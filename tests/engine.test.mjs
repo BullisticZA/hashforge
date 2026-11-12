@@ -479,3 +479,52 @@ test('old v2 saves load with risers and a boot drive added', () => {
   assert.equal(E.rigStats(loaded, loaded.rigs[0]).status, 'mining');
   assert.ok(rig);
 });
+
+test('goals guide a new player and pay out once', () => {
+  const s = E.newGame(11);
+  assert.equal(E.currentGoal(s).id, 'rig');
+  const cash0 = s.cash;
+  const rig = E.buy(s, 'frame4');
+  const done = E.checkGoals(s);
+  assert.deepEqual(done.map((g) => g.id), ['rig']);
+  assert.ok(Math.abs(s.cash - (cash0 - rig.price + 25)) < 1e-6, 'reward paid');
+  assert.equal(E.checkGoals(s).length, 0, 'no double payout');
+  E.buy(s, 'psu1000g'); E.buy(s, 'rtx3060ti'); E.buy(s, 'usb16');
+  E.autoFill(s, rig.uid);
+  const ids = E.checkGoals(s).map((g) => g.id);
+  for (const id of ['psu', 'gpu', 'boot', 'mining']) assert.ok(ids.includes(id), `${id} completes`);
+});
+
+test('old saves tick off finished goals without paying again', () => {
+  const s = E.newGame(12);
+  E.buy(s, 'frame4');
+  delete s.goals;
+  const cash = s.cash;
+  E.checkGoals(s);
+  assert.equal(s.cash, cash);
+  assert.ok(s.goals.done.includes('rig'));
+});
+
+test('endless milestones double after the guided goals', () => {
+  const s = E.newGame(13);
+  s.goals = { done: E.GOALS.map((g) => g.id), tier: 0 };
+  const a = E.currentGoal(s);
+  s.goals.tier = 1;
+  const b = E.currentGoal(s);
+  assert.ok(a.endless && b.endless);
+  assert.equal(b.reward, a.reward * 2);
+});
+
+test('repeated log lines collapse into a counter', () => {
+  const s = E.newGame(14);
+  const r = E.buy(s, 'frame4'); E.buy(s, 'psu1000g'); E.buy(s, 'rtx3060ti'); E.buy(s, 'usb16'); E.autoFill(s, r.uid);
+  E.advance(s, 24 * 120);
+  for (let i = 1; i < s.log.length; i++) assert.notEqual(s.log[i].text, s.log[i - 1].text, 'no identical neighbours');
+});
+
+test('offline catch-up is capped at a game week', () => {
+  const s = E.newGame(15);
+  assert.equal(E.catchUp(s, 30 * 1000), null, 'under a minute does nothing');
+  const r = E.catchUp(s, 48 * 3600 * 1000);
+  assert.equal(r.hours, 7 * 24);
+});

@@ -50,13 +50,21 @@ export class App {
   load() {
     try {
       const raw = localStorage.getItem(SAVE_KEY);
-      if (raw) { this.state = E.deserialize(raw); return; }
+      if (raw) {
+        this.state = E.deserialize(raw);
+        if (this.state.savedAt) {
+          const away = E.catchUp(this.state, Date.now() - this.state.savedAt);
+          if (away) this.awayReport = away;
+        }
+        return;
+      }
     } catch { /* corrupt or old save: start fresh */ }
     const region = detectRegion();
     this.state = E.newGame(undefined, { region });
   }
 
   save() {
+    this.state.savedAt = Date.now();
     try { localStorage.setItem(SAVE_KEY, E.serialize(this.state)); } catch { /* storage unavailable */ }
   }
 
@@ -150,11 +158,31 @@ export class App {
       case 'shop-sort': this.shopSort = a.value; this.render(true); break;
       case 'buy': {
         const item = byId[a.id];
-        if (this.result(E.buy(s, a.id), `Bought ${item.name}`) && item.kind === 'frame') this.toast('Add a PSU and GPUs: open the rig from the Floor.', '');
+        const res = E.buy(s, a.id);
+        if (!res.ok) { this.toast(res.error, 'bad'); break; }
+        const where = this.autoInstall(res.uid);
+        this.toast(where ? `Bought ${item.name} and installed it in ${where}` : `Bought ${item.name}`, 'good');
+        if (item.kind === 'frame') this.toast('Now add a PSU, GPUs and a boot drive: click the rig on the Floor.', '');
+        this.render(true);
         break;
       }
       case 'inspect': this.openViewer(byId[a.id], a.uid ? this.findOwned(a.uid) : {}); break;
-      case 'buy-listing': this.result(E.buyListing(s, a.id), 'Bought second-hand'); break;
+      case 'buy-listing': {
+        const res = E.buyListing(s, a.id);
+        if (!res.ok) { this.toast(res.error, 'bad'); break; }
+        const where = this.autoInstall(res.uid);
+        this.toast(where ? `Bought second-hand and installed it in ${where}` : 'Bought second-hand', 'good');
+        this.render(true);
+        break;
+      }
+      case 'install-to': {
+        const kind = byId[this.findOwned(a.uid).id].kind;
+        const res = kind === 'gpu' ? E.installGpu(s, a.arg, a.uid) : kind === 'psu' ? E.installPsu(s, a.arg, a.uid) : E.installBoot(s, a.arg, a.uid);
+        this.result(res, `Installed in ${s.rigs.find((r) => r.uid === a.arg)?.name}`);
+        break;
+      }
+      case 'auto-install': s.autoInstall = s.autoInstall === false; this.render(true); break;
+      case 'dismiss-away': this.awayReport = null; this.render(true); break;
       case 'buy-lot': {
         const res = E.buyLot(s, a.id);
         if (this.result(res)) this.showLot(JUNK_LOTS.find((l) => l.id === a.id), res.found);
@@ -252,6 +280,7 @@ export class App {
   render(force = false) {
     if (!force && (this.pointerDown || document.activeElement?.matches('input, select'))) return;
     this.room = E.roomStats(this.state);
+    for (const g of E.checkGoals(this.state, this.room)) this.toast(`🎯 Goal complete: ${g.title} (+{{usd:${g.reward}}})`, 'gold');
     this.renderHud();
     this.renderMain(force);
     this.renderSide();
@@ -376,6 +405,27 @@ export class App {
       <div class="card"><h3>Today</h3><div class="kv"><span>Mining</span><span class="good">${m(r.grossPerDay)}/day</span><span>Power</span><span class="bad">${m(r.demandWatts / 1000 * 24 * r.tariff)}/day</span><span>Net worth</span><span>${m(E.netWorth(this.state))}</span></div></div>
       <div class="card"><h3>Room</h3><div class="kv"><span>Dust</span><span class="${r.dust > 0.4 ? 'warn' : ''}">${Math.round(r.dust * 100)}% <button class="btn" style="padding:2px 8px" data-action="clean">Clean ${m(E.cleanCost(this.state))}</button></span><span>Room temp</span><span>${r.roomTemp.toFixed(1)} °C</span><span>Cooling</span><span>${kw(r.coolingCapacity)} of ${kw(r.minerWatts)} heat</span><span>Circuit</span><span class="${r.circuitPct > 0.9 ? 'bad' : ''}">${Math.round(r.circuitPct * 100)}%</span><span>Throttle</span><span class="${r.throttle < 1 ? 'warn' : ''}">${Math.round(r.throttle * 100)}%</span></div></div>
     </div>`;
+  }
+
+  /** Rigs a spare part could go into right now, best first (the selected rig, then the emptiest). */
+  rigsWithRoom(kind) {
+    const s = this.state;
+    const room = (r) => kind === 'gpu' ? byId[r.frameId].slots - r.gpus.length : kind === 'psu' ? byId[r.frameId].psuSlots - r.psus.length : kind === 'boot' ? +!r.boot : 0;
+    return s.rigs.filter((r) => room(r) > 0)
+      .sort((a, b) => (b.uid === this.selection?.uid) - (a.uid === this.selection?.uid) || room(b) - room(a));
+  }
+
+  /** After a purchase, put GPUs, PSUs and boot drives straight into a rig that has room. Returns the rig name or null. */
+  autoInstall(uid) {
+    const s = this.state;
+    if (s.autoInstall === false || !uid) return null;
+    const o = this.findOwned(uid);
+    if (!o || o.broken || !s.inventory.includes(o)) return null;
+    const kind = byId[o.id].kind;
+    const rig = this.rigsWithRoom(kind)[0];
+    if (!rig) return null;
+    const res = kind === 'gpu' ? E.installGpu(s, rig.uid, uid) : kind === 'psu' ? E.installPsu(s, rig.uid, uid) : kind === 'boot' ? E.installBoot(s, rig.uid, uid) : { ok: false };
+    return res.ok ? rig.name : null;
   }
 
   /** Installed parts and matching inventory for a rig, so it can be built without opening 3D. */
@@ -564,10 +614,12 @@ export class App {
   viewInventory() {
     const s = this.state;
     const inv = s.inventory;
-    return `<div class="page-head"><div><h1>Inventory</h1><div class="muted">Cards and PSUs not installed in a rig. Install them from a rig's 3D workshop on the Floor.</div></div></div>
+    return `<div class="page-head"><div><h1>Inventory</h1><div class="muted">Hardware that isn't installed yet. Install it here, or click a rig on the Floor.</div></div>
+      <label class="row small"><input type="checkbox" data-action="auto-install" ${s.autoInstall !== false ? 'checked' : ''}> Install new GPUs, PSUs and boot drives into a rig automatically</label></div>
       <div class="grid">${inv.map((o) => {
         const spec = byId[o.id];
-        return this.ownedCard(o, `<div class="row">
+        const targets = ['gpu', 'psu', 'boot'].includes(spec.kind) && !o.broken ? this.rigsWithRoom(spec.kind) : [];
+        return this.ownedCard(o, `${targets.length ? `<div class="row">${targets.slice(0, 3).map((r) => `<button class="btn primary" data-action="install-to" data-arg="${r.uid}" data-uid="${o.uid}">Install in ${esc(r.name)}</button>`).join('')}</div>` : ''}<div class="row">
           <button class="btn" data-action="inspect" data-id="${o.id}" data-uid="${o.uid}">3D</button>
           ${this.repairBtn(o)}
           ${spec.kind === 'gpu' ? `${this.modButtons(o)}<button class="btn" data-action="salvage" data-uid="${o.uid}">Salvage</button>` : ''}
@@ -677,12 +729,22 @@ export class App {
     const s = this.state;
     const tips = E.advise(s).slice(0, 6);
     const reg = E.region(s);
+    const goal = E.currentGoal(s, this.room);
+    const away = this.awayReport;
     const sideHtml = `
+      ${away ? `<div class="card away"><div class="spread"><h3>Welcome back</h3><button class="icon-btn" data-action="dismiss-away" aria-label="Dismiss">✕</button></div>
+        <div class="small">${away.days.toFixed(1)} game days passed while you were away.</div>
+        <div class="kv" style="margin-top:6px"><span>Mined</span><span class="good">${this.money(away.mined)}</span><span>Cash change</span><span class="${away.cashChange >= 0 ? 'good' : 'bad'}">${away.cashChange >= 0 ? '+' : ''}${this.money(away.cashChange)}</span></div>
+        <div class="small muted" style="margin-top:6px">Time away runs at 1 game hour per real minute, up to a game week. Check the log for anything that broke.</div></div>` : ''}
+      <div class="goal-card"><div class="spread"><h3>🎯 ${goal.endless ? 'Milestone' : `Goal ${goal.index + 1} of ${goal.total}`}</h3><span class="small good">+${this.money(goal.reward)}</span></div>
+        <div class="goal-title">${esc(this.fmt(goal.title))}</div>
+        <div class="bar" style="margin:6px 0"><i style="width:${Math.round(goal.value * 100)}%"></i></div>
+        <div class="small muted">${esc(this.fmt(goal.hint))}</div></div>
       <div><h3 style="margin-bottom:8px">🤖 Advisor</h3>${tips.map((t) => `<div class="tip ${t.level}">${esc(this.fmt(t.text))}</div>`).join('<div style="height:6px"></div>')}</div>
       ${reg.loadShedding ? `<div><h3 style="margin-bottom:6px">Load-shedding ${s.grid.stage ? `<span class="warn">Stage ${s.grid.stage}</span>` : '<span class="good">off</span>'}</h3>
         <div class="shed">${E.sheddingSchedule(s, 24).map((off, i) => `<i class="${off ? 'off' : ''} ${i === 0 ? 'now' : ''}"></i>`).join('')}</div>
         <div class="small muted" style="margin-top:4px">Next 24 hours (red = no grid)</div></div>` : ''}
-      <div><h3 style="margin-bottom:8px">Log</h3><div class="log">${s.log.slice(0, 14).map((l) => `<div class="${l.type}"><span class="muted">D${Math.floor(l.day) + 1}</span> ${esc(this.fmt(l.text))}</div>`).join('')}</div></div>`;
+      <div><h3 style="margin-bottom:8px">Log</h3><div class="log">${s.log.slice(0, 14).map((l) => `<div class="${l.type}"><span class="muted">D${Math.floor(l.day) + 1}</span> ${esc(this.fmt(l.text))}${l.count > 1 ? ` <span class="count">×${l.count}</span>` : ''}</div>`).join('')}</div></div>`;
     if (sideHtml !== this.lastSideHtml) { this.lastSideHtml = sideHtml; $('#side').innerHTML = sideHtml; }
     if (s.gameOver && !this.shownGameOver) {
       this.shownGameOver = true;

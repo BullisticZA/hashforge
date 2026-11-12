@@ -31,6 +31,14 @@ a sensible start should *usually* make money in the first game-year, but never g
 - New mods: **fresh thermal paste** and **replacement fans** that restore worn cards
 - Shop **search and sort** (profit, payback, price, newest)
 
+## ✅ v0.1.3: Flow update
+- **Goals:** 15 guided goals from your first rig to solar and ASICs, then endless profit milestones (each doubles), all with cash rewards
+- **Build from the Floor** without opening 3D: installed parts, matching inventory with Add / Remove, and Auto-fill
+- **Auto-install** for new GPUs, PSUs and boot drives (switch it off in Inventory); Inventory has "Install in Rig N" buttons
+- **Offline progress** with a "Welcome back" report
+- Repeated log lines (daily outages) collapse into one line with a counter
+- Advisor tells you when every rig is full and what to do about it
+
 ## 🔜 v0.2: Builders & Workshop
 - **Thermal work:** repaste, new thermal pads, copper shims and plates: lower temps, less wear, more hashrate
 - **Workshop tools:** screwdriver kit, multimeter, thermal camera, reflow station, BIOS programmer. Better tools unlock better repairs

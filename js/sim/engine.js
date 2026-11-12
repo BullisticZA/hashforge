@@ -79,6 +79,7 @@ export function newGame(seed = Date.now() % 2147483647, options = {}) {
     mods: { gpuPrice: 1, asicPrice: 1, ambient: 0, ambientDaysLeft: 0 },
     power: { gridKwh: 0, gridCost: 0, dieselCost: 0, lastBillDay: 0 },
     stats: { minedUsd: 0, powerPaid: 0, bestDay: 0, earnedToday: 0, costToday: 0, crafted: 0, lotsOpened: 0, goldens: 0 },
+    goals: { done: [], tier: 0 },
     log: [],
     prestige,
     gameOver: false,
@@ -95,6 +96,9 @@ export const location = (state) => LOCATIONS.find((l) => l.id === state.location
 export const region = (state) => REGIONS.find((r) => r.id === state.region);
 
 function addLog(state, type, text) {
+  const top = state.log[0];
+  // The same message again (an outage every day, say) bumps a counter instead of flooding the log.
+  if (top && top.type === type && top.text === text) { top.count = (top.count || 1) + 1; top.day = state.day; return; }
   state.log.unshift({ day: state.day, type, text });
   if (state.log.length > 100) state.log.length = 100;
 }
@@ -1178,6 +1182,83 @@ export function advance(state, hours) {
   }
 }
 
+// ------------------------------------------------------------------ goals
+
+/** Net profit per day if the grid stays up: what the player's operation is really worth per day. */
+export function profitPerDay(state, room = roomStats(state)) {
+  return room.potentialGrossPerDay - room.demandWatts / 1000 * DAY_HOURS * tariffUsd(state);
+}
+
+/** A guided path through the early game, then endless profit milestones. Rewards are in USD. */
+export const GOALS = [
+  { id: 'rig', title: 'Buy a rig kit', hint: 'Vendors → Rig kits. The 4-GPU kit is a good start.', reward: 25, progress: (s) => +(s.rigs.length > 0) },
+  { id: 'psu', title: 'Put a power supply in your rig', hint: 'Buy a PSU, then click the rig on the Floor and press Add.', reward: 25, progress: (s) => +s.rigs.some((r) => r.psus.length) },
+  { id: 'gpu', title: 'Install a graphics card', hint: 'Buy a GPU (check "Net after power" on the card), then Add it to the rig.', reward: 30, progress: (s) => +s.rigs.some((r) => r.gpus.length) },
+  { id: 'boot', title: 'Fit a boot drive', hint: 'A 16 GB USB flash drive under Vendors → Risers, boot & thermal runs the Linux mining OS.', reward: 20, progress: (s) => +s.rigs.some((r) => r.boot) },
+  { id: 'mining', title: 'Start mining', hint: 'A rig needs a PSU, at least one GPU and a boot drive. The Advisor tells you what is missing.', reward: 50, progress: (s, room) => +room.rigs.some((r) => r.running) },
+  { id: 'profit5', title: 'Make {{usd:5}} a day after power', hint: 'Add more efficient cards. Cards that lose money at your tariff do more harm than good.', reward: 75, progress: (s, room) => Math.max(0, Math.min(1, profitPerDay(s, room) / 5)) },
+  { id: 'junk', title: 'Open a junkyard lot', hint: 'Cheap bins hide parts and the odd golden sample.', reward: 20, progress: (s) => +(s.stats.lotsOpened > 0) },
+  { id: 'craft', title: 'Build a card on the Workbench', hint: 'Match a core with memory, a PCB and a cooler from junkyard parts.', reward: 75, progress: (s) => +(s.stats.crafted > 0) },
+  { id: 'fullrig', title: 'Fill every GPU slot in a rig', hint: 'Use Auto-fill on the Floor once you have enough cards.', reward: 100, progress: (s) => Math.max(0, ...s.rigs.map((r) => r.gpus.length / byId[r.frameId].slots)) },
+  { id: 'backup', title: 'Ride out load-shedding', hint: 'An inverter plus batteries keeps miners running when the grid goes down.', reward: 150, progress: (s) => {
+    const cap = energyCapacity(s); return (cap.inverterKw > 0 ? 0.5 : 0) + (cap.batteryKwh > 0 || cap.generatorKw > 0 ? 0.5 : 0);
+  } },
+  { id: 'profit25', title: 'Make {{usd:25}} a day after power', hint: 'More rigs, better cards, or a second-hand ASIC.', reward: 250, progress: (s, room) => Math.max(0, Math.min(1, profitPerDay(s, room) / 25)) },
+  { id: 'asic', title: 'Run an ASIC miner', hint: 'ASICs need a rack. Older models are cheap but need cheap power.', reward: 150, progress: (s, room) => +room.racks.some((r) => r.miners.some((m) => m.running)) },
+  { id: 'move', title: 'Move out of the bedroom', hint: 'Vendors → Locations. Bigger places mean more circuits, more slots and cheaper power.', reward: 300, progress: (s) => +(LOCATIONS.findIndex((l) => l.id === s.location) > 0) },
+  { id: 'solar', title: 'Install solar panels', hint: 'Panels need an inverter. They cut your daytime bill and charge batteries.', reward: 300, progress: (s) => +(s.energy.solar.length > 0) },
+  { id: 'profit100', title: 'Make {{usd:100}} a day after power', hint: 'Scale up: racks of ASICs, full rigs and cheap power.', reward: 750, progress: (s, room) => Math.max(0, Math.min(1, profitPerDay(s, room) / 100)) },
+];
+const ENDLESS_START = 250;
+
+/** The goal the player is working on now: the first unfinished guided goal, then ever-bigger profit targets. */
+export function currentGoal(state, room = roomStats(state)) {
+  const g = state.goals || { done: [], tier: 0 };
+  const next = GOALS.find((x) => !g.done.includes(x.id));
+  if (next) return { ...next, value: next.progress(state, room), index: GOALS.indexOf(next), total: GOALS.length };
+  const target = ENDLESS_START * 2 ** (g.tier || 0);
+  return {
+    id: `endless${g.tier || 0}`, endless: true, title: `Make {{usd:${target}}} a day after power`,
+    hint: 'Keep growing: every milestone doubles the target and the reward.', reward: target * 8,
+    value: Math.max(0, Math.min(1, profitPerDay(state, room) / target)), index: GOALS.length + (g.tier || 0), total: null,
+  };
+}
+
+/** Pay out every goal that is complete right now. Returns the goals finished in this call. */
+export function checkGoals(state, room = roomStats(state)) {
+  if (!state.goals) {
+    // Saves from before goals existed: tick off what's already done without paying for it again.
+    state.goals = { done: GOALS.filter((x) => x.progress(state, room) >= 1).map((x) => x.id), tier: 0 };
+  }
+  const finished = [];
+  for (let guard = 0; guard < 40; guard++) {
+    const goal = currentGoal(state, room);
+    if (goal.value < 1) break;
+    if (goal.endless) state.goals.tier = (state.goals.tier || 0) + 1;
+    else state.goals.done.push(goal.id);
+    state.cash += goal.reward;
+    addLog(state, 'milestone', `Goal complete: ${goal.title}. Reward {{usd:${goal.reward}}}.`);
+    finished.push(goal);
+  }
+  return finished;
+}
+
+// ------------------------------------------------------------------ offline progress
+
+const OFFLINE_MAX_HOURS = 7 * DAY_HOURS;
+/** Catch up on time spent away: one game hour per real minute, up to a game week. */
+export function catchUp(state, awayMs) {
+  const hours = Math.min(OFFLINE_MAX_HOURS, Math.floor(awayMs / 60000));
+  if (hours < 1 || state.gameOver) return null;
+  const before = { cash: state.cash, mined: state.stats.minedUsd, day: state.day };
+  advance(state, hours);
+  return {
+    hours, days: state.day - before.day,
+    cashChange: state.cash - before.cash,
+    mined: state.stats.minedUsd - before.mined,
+  };
+}
+
 // ------------------------------------------------------------------ advisor
 
 export function advise(state) {
@@ -1233,7 +1314,13 @@ export function advise(state) {
     });
   });
   const idle = state.inventory.filter((x) => byId[x.id].kind === 'gpu' && !x.broken).length;
-  if (idle) add('info', `${idle} working GPU(s) in inventory. Install them to earn.`);
+  if (idle) {
+    const room = state.rigs.some((r) => r.gpus.length < byId[r.frameId].slots);
+    const loc = location(state);
+    add('info', room ? `${idle} working GPU(s) in inventory. Install them to earn.`
+      : state.rigs.length < loc.rigSlots ? `${idle} working GPU(s) in inventory but every rig is full. Buy another rig kit.`
+        : `${idle} working GPU(s) in inventory but every rig is full and there is no floor space. Sell them or move somewhere bigger.`);
+  }
   if (state.parts.some((p) => p.type === 'core')) add('info', 'You have GPU cores. Match memory, PCB and cooler on the Workbench to build a card.');
   const nextLoc = LOCATIONS[LOCATIONS.indexOf(loc) + 1];
   if (nextLoc && state.cash > nextLoc.price * 1.3) add('info', `You can afford the ${nextLoc.name}: more space and ${Math.round((1 - nextLoc.tariffMult) * 100)}% cheaper power.`);

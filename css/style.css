@@ -82,6 +82,11 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.3px; }
 .small-btn { padding: 4px 10px; font-size: 12px; }
 
 /* side panel */
+.goal-card { background: linear-gradient(135deg, #13233f, #1a1840); border: 1px solid #2f3f6b; border-radius: var(--radius); padding: 12px; }
+.goal-card h3 { font-size: 13px; color: var(--muted); font-weight: 600; }
+.goal-title { font-weight: 700; font-size: 15px; margin-top: 4px; }
+.away { border-color: var(--good); }
+.log .count { display: inline-block; font-size: 10px; padding: 0 6px; border-radius: 99px; background: #22324f; color: var(--text); }
 .tip { border-left: 3px solid var(--line); padding: 6px 8px; background: var(--card); border-radius: 6px; font-size: 13px; }
 .tip.critical { border-color: var(--bad); } .tip.warning { border-color: var(--warn); } .tip.info { border-color: var(--accent); } .tip.good { border-color: var(--good); }
 .log { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }

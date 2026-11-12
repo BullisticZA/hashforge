@@ -37,6 +37,9 @@ Start in a bedroom corner with a little savings and a dream. Buy a rig kit, a po
   - **Power and site gear:** 14 PSUs, 8 rig frames, 7 racks (up to a 20 ft container pod), 15 cooling units (box fans to evaporative towers, chillers and immersion tanks), 8 inverters, 8 batteries, 7 solar arrays, 4 generators
   - **Rig parts and mods:** 7 riser types, 7 boot drives, thermal pads, copper shims, fresh thermal paste and replacement fans
 - Shop **search and sort** by profit, payback time, price or release year
+- **Goals** that walk you through your first rig, then endless profit milestones that double each time, with cash rewards
+- **Build from the Floor:** click a rig to see what's in it and what's in your inventory, add or remove parts, or Auto-fill. New purchases install themselves into a rig with room
+- **Time away counts:** come back to a "Welcome back" report (1 game hour per real minute, up to a game week)
 - **Six algorithms:** SHA-256, Scrypt, kHeavyHash, KawPow, Etchash, Autolykos2. Rigs auto-switch to the most profitable
 - **Vendors, a used marketplace and a junkyard**, with quality grades from Scrap to **Golden Sample**
 - **GPU crafting:** match a core, memory, PCB and cooler; salvage cards back into parts
