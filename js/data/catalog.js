@@ -116,6 +116,7 @@ export const COOLING = [
   { id: 'windowac', name: 'Window Air Conditioner', cooling: 2500, power: 850, price: 320, kind: 'cooling', style: 'ac' },
   { id: 'portac', name: 'Portable Air Conditioner', cooling: 3500, power: 1100, price: 450, kind: 'cooling', style: 'ac' },
   { id: 'splitac', name: 'Split-Unit Air Conditioner', cooling: 7000, power: 2000, price: 1200, kind: 'cooling', style: 'ac' },
+  { id: 'evap', name: 'Evaporative Cooler', cooling: 6000, power: 250, price: 700, kind: 'cooling', style: 'evap', humid: true },
   { id: 'industrial', name: 'Industrial Exhaust Wall', cooling: 15000, power: 900, price: 2600, kind: 'cooling', style: 'wall' },
   { id: 'crac', name: 'Precision CRAC Unit (Data Centre AC)', cooling: 45000, power: 9000, price: 22000, kind: 'cooling', style: 'crac' },
   { id: 'immersion', name: 'Immersion Cooling Tank', cooling: 30000, power: 1500, price: 9000, kind: 'cooling', style: 'tank' },
@@ -172,5 +173,33 @@ export const LOCATIONS = [
   { id: 'hydro', name: 'Hydro-Powered Mining Hall', rigSlots: 30, rackSlots: 14, coolingSlots: 10, roofKwp: 200, circuitKw: 500, tariffMult: 0.25, ambient: 12, roomSize: 14, price: 250000, w: 44, d: 28 },
 ];
 
-export const ALL_ITEMS = [...GPUS, ...ASICS, ...PSUS, ...FRAMES, ...COOLING, ...RACKS, ...INVERTERS, ...BATTERIES, ...SOLAR, ...GENERATORS];
+// PCIe risers: every rig kit ships with basic 009S risers (Molex / 6-pin powered).
+// SATA-powered risers are cheap but a SATA connector is rated far below what a card can pull through the slot - a fire risk.
+export const RISERS = [
+  { id: 'riser009s', name: 'PCIe Riser 009S (6-pin/Molex)', power: '6-pin', reliability: 1, fireRisk: 0, price: 6, kind: 'riser' },
+  { id: 'riser009sata', name: 'PCIe Riser 009S (SATA-powered)', power: 'SATA', reliability: 1.3, fireRisk: 1, price: 3, kind: 'riser' },
+  { id: 'riser011pro', name: 'PCIe Riser 011 Pro (shielded, 6-pin)', power: '6-pin', reliability: 0.3, fireRisk: 0, price: 14, kind: 'riser' },
+];
+// Boot media: a rig won't mine without one. Flash drives are cheap but wear out fastest.
+export const BOOT = [
+  { id: 'usb16', name: '16 GB USB 3.0 Flash Drive', gb: 16, reliability: 2, price: 8, kind: 'boot', style: 'usb' },
+  { id: 'ssd120', name: '120 GB SATA SSD', gb: 120, reliability: 0.7, price: 22, kind: 'boot', style: 'ssd' },
+  { id: 'nvme256', name: '256 GB M.2 NVMe SSD', gb: 256, reliability: 0.4, price: 35, kind: 'boot', style: 'nvme' },
+];
+// Workbench consumables for GPUs.
+export const MODS = [
+  { id: 'pads', name: 'Thermal Pad Kit (12.8 W/mK)', desc: 'Re-pad the memory. GDDR6X cards stop throttling on memory heat; all cards wear slower.', price: 30, kind: 'mod' },
+  { id: 'shim', name: 'Copper Shim Kit', desc: 'Copper shims on the memory: +3% hashrate on top of fresh pads, even less wear.', price: 15, kind: 'mod', needs: 'pads' },
+];
+export const OS = {
+  linux: { name: 'Linux mining OS', licence: 0, overheadW: 0, maxGpus: 16, hashBonus: 0, desc: 'Free and lean. Built for big rigs.' },
+  windows: { name: 'Windows 11 Pro', licence: 139, overheadW: 35, maxGpus: 8, hashBonus: 0.03, desc: 'Licence and overhead, max 8 GPUs, but overclock tools: +3% on NVIDIA cards.' },
+};
+// Facility upgrades (per location), priced by room size.
+export const FACILITY = [
+  { id: 'containment', name: 'Hot/Cold Aisle Containment', desc: 'Foam and sheet-metal barriers stop hot exhaust looping back: +25% cooling effectiveness.', price: 400 },
+  { id: 'filters', name: 'Intake Dust Filters', desc: 'Pleated filters on the intakes: dust builds up 60% slower.', price: 150 },
+];
+
+export const ALL_ITEMS = [...GPUS, ...ASICS, ...PSUS, ...FRAMES, ...COOLING, ...RACKS, ...INVERTERS, ...BATTERIES, ...SOLAR, ...GENERATORS, ...RISERS, ...BOOT, ...MODS];
 export const byId = Object.fromEntries(ALL_ITEMS.map((i) => [i.id, i]));

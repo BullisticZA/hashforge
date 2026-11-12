@@ -13,6 +13,8 @@ function starterRig(state, gpuId = 'rtx3060ti', count = 6, psuId = 'psu1000g', f
   assert.ok(rig.ok, rig.error);
   const psu = E.buy(state, psuId);
   assert.ok(E.installPsu(state, rig.uid, psu.uid).ok);
+  const boot = E.buy(state, 'usb16');
+  assert.ok(E.installBoot(state, rig.uid, boot.uid).ok);
   for (let i = 0; i < count; i++) {
     const g = E.buy(state, gpuId);
     assert.ok(g.ok, g.error);
@@ -78,24 +80,25 @@ test('auto algorithm and autoFill pick the most profitable options', () => {
   s.market.index.kawpow = 5; s.market.index.etchash = 0.3; s.market.index.autolykos = 0.3;
   assert.equal(E.rigStats(s, rig).algo, 'kawpow');
   const r2 = E.buy(s, 'frame4');
-  for (const id of ['psu650b', 'psu1300g', 'rx570', 'rtx3070', 'rtx3060ti', 'rx6600', 'rtx3080']) E.buy(s, id);
+  for (const id of ['psu650b', 'psu1300g', 'rx570', 'rtx3070', 'rtx3060ti', 'rx6600', 'rtx3080', 'ssd120']) E.buy(s, id);
   E.autoFill(s, r2.uid);
   const filled = s.rigs.find((r) => r.uid === r2.uid);
   assert.equal(filled.psus[0].id, 'psu1300g');
   assert.equal(filled.gpus.length, 4);
   assert.ok(filled.gpus.some((g) => g.id === 'rtx3080'));
+  assert.equal(filled.boot.id, 'ssd120', 'autoFill installs a boot drive');
 });
 
 // ------------------------------------------------------------------ quality, wear, repair
 
 test('quality grades change hashrate and power', () => {
   const s = fresh();
-  const golden = E.gpuEffective(s, { id: 'rtx3080', q: 'golden', cond: 1 });
-  const scrap = E.gpuEffective(s, { id: 'rtx3080', q: 'scrap', cond: 1 });
-  const worn = E.gpuEffective(s, { id: 'rtx3080', q: 'new', cond: 0.2 });
-  assert.ok(golden.hash.kawpow > byId.rtx3080.hash.kawpow && golden.power < byId.rtx3080.power);
-  assert.ok(scrap.hash.kawpow < worn.hash.kawpow && scrap.power > byId.rtx3080.power);
-  assert.ok(worn.hash.kawpow < byId.rtx3080.hash.kawpow);
+  const golden = E.gpuEffective(s, { id: 'rtx3070', q: 'golden', cond: 1 });
+  const scrap = E.gpuEffective(s, { id: 'rtx3070', q: 'scrap', cond: 1 });
+  const worn = E.gpuEffective(s, { id: 'rtx3070', q: 'new', cond: 0.2 });
+  assert.ok(golden.hash.kawpow > byId.rtx3070.hash.kawpow && golden.power < byId.rtx3070.power);
+  assert.ok(scrap.hash.kawpow < worn.hash.kawpow && scrap.power > byId.rtx3070.power);
+  assert.ok(worn.hash.kawpow < byId.rtx3070.hash.kawpow);
 });
 
 test('hot, cheap hardware wears out and fails; repair brings it back', () => {
@@ -103,6 +106,7 @@ test('hot, cheap hardware wears out and fails; repair brings it back', () => {
   s.mods.ambient = 18;                     // brutal heat
   const rig = E.buy(s, 'frame8');
   E.installPsu(s, rig.uid, E.buy(s, 'psu2000t').uid);
+  E.installBoot(s, rig.uid, E.buy(s, 'nvme256').uid);
   for (let i = 0; i < 8; i++) {
     s.inventory.push({ uid: `scrap${i}`, id: 'rtx3070', q: 'scrap', cond: 0.4, broken: false, boughtDay: 0 });
     E.installGpu(s, rig.uid, `scrap${i}`);
@@ -274,9 +278,16 @@ test('a sensible strategy usually grows net worth over a game year (but not alwa
   let wins = 0;
   for (let seed = 1; seed <= 12; seed++) {
     const s = E.newGame(seed);
-    starterRig(s);
+    const rig = starterRig(s);
     E.buy(s, 'boxfan');
-    E.advance(s, 24 * 365);
+    // A sensible player checks in monthly: replaces dead boot drives and risers, repairs cards, cleans dust.
+    for (let month = 0; month < 12; month++) {
+      E.advance(s, 24 * 30.4);
+      if (rig.boot?.broken && s.cash > 10) E.installBoot(s, rig.uid, E.buy(s, 'usb16').uid);
+      rig.risers.forEach((r, k) => { if (r.broken && s.cash > 10) E.swapRiser(s, rig.uid, k, E.buy(s, 'riser009s').uid); });
+      [...rig.gpus, ...rig.psus].forEach((g) => { if (g.broken && s.cash > E.repairCost(s, g)) E.repair(s, g.uid); });
+      if (s.dust > 0.4 && s.cash > E.cleanCost(s)) E.cleanDust(s);
+    }
     if (E.netWorth(s) > 2500) wins++;
   }
   assert.ok(wins >= 6 && wins <= 12, `won ${wins}/12`);
@@ -333,4 +344,138 @@ test('fractional time steps add up exactly', () => {
 test('regions exist for currency detection', () => {
   assert.ok(REGIONS.find((r) => r.id === 'za' && r.loadShedding && r.symbol === 'R'));
   assert.ok(JUNK_LOTS.length >= 4);
+});
+
+// ------------------------------------------------------------------ v0.1.1 realism
+
+test('a rig without a boot drive will not mine', () => {
+  const s = rich();
+  const rig = E.buy(s, 'frame4');
+  E.installPsu(s, rig.uid, E.buy(s, 'psu850g').uid);
+  E.installGpu(s, rig.uid, E.buy(s, 'rtx3060ti').uid);
+  assert.equal(E.rigStats(s, s.rigs[0]).status, 'no-boot');
+  assert.ok(E.advise(s).some((t) => /boot drive/.test(t.text)));
+  E.installBoot(s, rig.uid, E.buy(s, 'usb16').uid);
+  assert.equal(E.rigStats(s, s.rigs[0]).status, 'mining');
+});
+
+test('rig kits ship with risers; a dead riser drops its card; swapping fixes it', () => {
+  const s = rich();
+  const rig = starterRig(s, 'rtx3060ti', 2);
+  assert.equal(rig.risers.length, 6);
+  const full = E.rigStats(s, rig).hashrate;
+  rig.risers[0].broken = true;
+  const after = E.rigStats(s, rig);
+  assert.equal(after.deadRisers, 1);
+  assert.ok(Math.abs(after.hashrate - full / 2) < 1e-6);
+  const fresh = E.buy(s, 'riser011pro');
+  assert.ok(E.swapRiser(s, rig.uid, 0, fresh.uid).ok);
+  assert.ok(Math.abs(E.rigStats(s, rig).hashrate - full) < 1e-6);
+});
+
+test('SATA-powered risers can start fires', () => {
+  let fires = 0;
+  for (let seed = 1; seed <= 6; seed++) {
+    const s = E.newGame(seed); s.cash = 1e7;
+    const rig = starterRig(s, 'rtx3080', 6, 'psu1600p');
+    for (let k = 0; k < 6; k++) E.swapRiser(s, rig.uid, k, E.buy(s, 'riser009sata').uid);
+    E.buy(s, 'portac');
+    E.advance(s, 24 * 200);
+    if (s.log.some((l) => /FIRE/.test(l.text))) fires++;
+  }
+  assert.ok(fires >= 1, 'with six SATA risers on 230 W cards, fires happen');
+});
+
+test('Windows: licence, overhead, 8-GPU limit and an NVIDIA overclock bonus', () => {
+  const s = rich();
+  const rig = starterRig(s, 'rtx3070', 4);
+  const linux = E.rigStats(s, rig);
+  const cash = s.cash;
+  assert.ok(E.setOs(s, rig.uid, 'windows').ok);
+  assert.equal(s.cash, cash - 139);
+  const win = E.rigStats(s, rig);
+  assert.ok(win.hashrate > linux.hashrate && win.dcLoad === linux.dcLoad + 35);
+  E.setOs(s, rig.uid, 'linux'); E.setOs(s, rig.uid, 'windows');
+  assert.equal(s.cash, cash - 139, 'licence is paid once');
+  s.cash = 1e7; E.moveTo(s, 'garage');
+  const big = starterRig(s, 'rx6600', 12, 'psu2000t', 'frame12');
+  E.setOs(s, big.uid, 'windows');
+  assert.equal(E.rigStats(s, big).overOsLimit, 4);
+});
+
+test('thermal pads stop GDDR6X memory throttling; shims need pads first', () => {
+  const s = rich();
+  const g = E.buy(s, 'rtx3090');
+  const card = s.inventory.find((x) => x.uid === g.uid);
+  const before = E.gpuEffective(s, card);
+  assert.ok(before.memThrottled);
+  const shim = E.buy(s, 'shim');
+  assert.match(E.applyMod(s, g.uid, shim.uid).error, /pads first/);
+  assert.ok(E.applyMod(s, g.uid, E.buy(s, 'pads').uid).ok);
+  const padded = E.gpuEffective(s, card);
+  assert.ok(!padded.memThrottled && padded.hash.kawpow > before.hash.kawpow * 1.15);
+  assert.ok(E.applyMod(s, g.uid, shim.uid).ok);
+  assert.ok(E.gpuEffective(s, card).hash.kawpow > padded.hash.kawpow);
+  const plainUid = E.buy(s, 'rtx3060ti').uid;
+  const gddr6 = s.inventory.find((x) => x.uid === plainUid);
+  assert.equal(E.gpuEffective(s, gddr6).memThrottled, false);
+});
+
+test('dust builds up and cuts cooling; filters slow it; cleaning resets it', () => {
+  const run = (filters) => {
+    const s = rich();
+    starterRig(s); E.buy(s, 'portac');
+    if (filters) assert.ok(E.buyFacility(s, 'filters').ok);
+    E.advance(s, 24 * 60);
+    return s;
+  };
+  const dirty = run(false); const filtered = run(true);
+  assert.ok(dirty.dust > filtered.dust * 2);
+  const capDirty = E.roomStats(dirty).coolingCapacity;
+  assert.ok(E.cleanDust(dirty).ok);
+  assert.ok(E.roomStats(dirty).coolingCapacity > capDirty);
+});
+
+test('aisle containment boosts cooling; evaporative coolers struggle on humid days', () => {
+  const s = rich();
+  E.buy(s, 'evap');
+  s.weather = 1;
+  const dry = E.roomStats(s).coolingCapacity;
+  s.weather = 0.25;
+  assert.ok(Math.abs(E.roomStats(s).coolingCapacity - dry / 2) < 1e-6);
+  s.weather = 1;
+  assert.ok(E.buyFacility(s, 'containment').ok);
+  assert.ok(Math.abs(E.roomStats(s).coolingCapacity - dry * 1.25) < 1e-6);
+});
+
+test('hot ASICs draw more power for the same hashrate', () => {
+  const s = rich();
+  E.buy(s, 'shelf'); E.buy(s, 's21');
+  s.lastDeviceTemp = 50;
+  const cool = E.rackStats(s, s.racks[0]).load;
+  s.lastDeviceTemp = 90;
+  assert.ok(E.rackStats(s, s.racks[0]).load > cool * 1.2);
+});
+
+test('South African daytime surplus tariff: cheap by day, dear at night', () => {
+  const s = rich();
+  assert.equal(E.tariffHourMult(s, 12), 1);
+  assert.ok(E.setTariffPlan(s, 'daytime').ok);
+  assert.ok(E.tariffHourMult(s, 12) < 0.6 && E.tariffHourMult(s, 22) > 1);
+  const us = rich({ region: 'us' });
+  assert.equal(E.setTariffPlan(us, 'daytime').ok, false);
+});
+
+test('old v2 saves load with risers and a boot drive added', () => {
+  const s = rich();
+  const rig = starterRig(s);
+  const old = structuredClone(s);
+  old.version = 2;
+  delete old.rigs[0].risers; delete old.rigs[0].boot; delete old.dust; delete old.facility;
+  const loaded = E.deserialize(JSON.stringify(old));
+  assert.equal(loaded.version, E.SAVE_VERSION);
+  assert.equal(loaded.rigs[0].risers.length, 6);
+  assert.ok(loaded.rigs[0].boot);
+  assert.equal(E.rigStats(loaded, loaded.rigs[0]).status, 'mining');
+  assert.ok(rig);
 });

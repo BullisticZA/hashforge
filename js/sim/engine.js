@@ -2,7 +2,7 @@
 // Money is tracked in USD internally; the UI shows it in the player's currency.
 
 import {
-  ALGOS, GPU_ALGOS, GPUS, ASICS, PSUS, LOCATIONS, REGIONS, byId,
+  ALGOS, GPU_ALGOS, GPUS, ASICS, PSUS, LOCATIONS, REGIONS, RISERS, OS, FACILITY, byId,
 } from '../data/catalog.js';
 import {
   QUALITY, QUALITY_ORDER, gradeAt, PART_TYPES, CRAFT_FEE, JUNK_LOTS, UPGRADES,
@@ -11,7 +11,7 @@ import {
 
 export const DAY_HOURS = 24;
 export const BILL_PERIOD_DAYS = 30;
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 const DEVICE_TEMP_OFFSET = 35;  // chips run this much hotter than the room
 const THROTTLE_AT = 75;
 const SHUTDOWN_AT = 95;
@@ -72,6 +72,10 @@ export function newGame(seed = Date.now() % 2147483647, options = {}) {
     market: { index, difficulty, history, regime: 'bull', regimeDaysLeft: 45, halvings: 0 },
     listings: [],
     weather: 1,
+    dust: 0,
+    facility: {},
+    tariffPlan: 'standard',
+    lastDeviceTemp: 40,
     mods: { gpuPrice: 1, asicPrice: 1, ambient: 0, ambientDaysLeft: 0 },
     power: { gridKwh: 0, gridCost: 0, dieselCost: 0, lastBillDay: 0 },
     stats: { minedUsd: 0, powerPaid: 0, bestDay: 0, earnedToday: 0, costToday: 0, crafted: 0, lotsOpened: 0, goldens: 0 },
@@ -117,6 +121,21 @@ export function effects(state) {
 export function tariffUsd(state) {
   return (state.tariffLocal / state.fx) * location(state).tariffMult * effects(state).tariff;
 }
+/**
+ * Daytime-surplus plan (South Africa): cheap while rooftop solar floods the grid (06:00-17:59),
+ * pricier at night. Inspired by Eskom's 2026 talk of selling surplus daytime power to miners.
+ */
+export function tariffHourMult(state, hour = state.hours % DAY_HOURS) {
+  if (state.tariffPlan !== 'daytime') return 1;
+  return hour >= 6 && hour < 18 ? 0.55 : 1.2;
+}
+export function setTariffPlan(state, plan) {
+  if (!['standard', 'daytime'].includes(plan)) return fail('Unknown plan');
+  if (plan === 'daytime' && state.region !== 'za') return fail('The daytime surplus plan is only offered in South Africa.');
+  state.tariffPlan = plan;
+  addLog(state, 'info', plan === 'daytime' ? 'Switched to the daytime surplus tariff: cheap by day, pricier at night.' : 'Switched to the standard tariff.');
+  return { ok: true };
+}
 export function halvingFactor(state, algo) {
   return algo === 'sha256' ? 0.5 ** state.market.halvings : 1;
 }
@@ -157,10 +176,15 @@ export function gpuEffective(state, owned) {
   const spec = byId[owned.id];
   const q = QUALITY[owned.q || 'new'];
   if (owned.broken) return { hash: { kawpow: 0, etchash: 0, autolykos: 0 }, power: 0 };
-  const m = q.perf * condFactor(owned) * effects(state).hash;
+  const mods = owned.mods || {};
+  // GDDR6X runs hot: stock pads let the memory throttle (~110 °C) until the card is re-padded.
+  let thermal = spec.mem === 'GDDR6X' && !mods.pads ? 0.85 : 1;
+  if (mods.shim) thermal *= 1.03;
+  const m = q.perf * condFactor(owned) * effects(state).hash * thermal;
   return {
     hash: Object.fromEntries(GPU_ALGOS.map((a) => [a, spec.hash[a] * m])),
     power: spec.power * q.power,
+    memThrottled: thermal < 1,
   };
 }
 export function asicEffective(state, owned) {
@@ -186,18 +210,31 @@ export function bestGpuAlgo(state, gpus) {
 
 export function rigStats(state, rig) {
   const frame = byId[rig.frameId];
-  const eff = rig.gpus.map((g) => gpuEffective(state, g));
+  const os = OS[rig.os || 'linux'];
+  // A card only works if its riser does, and only the OS's GPU limit is used.
+  const active = rig.gpus.map((g, i) => ({ g, ok: !(rig.risers?.[i]?.broken) && i < os.maxGpus }));
+  const eff = active.map(({ g, ok }) => {
+    if (!ok) return { hash: { kawpow: 0, etchash: 0, autolykos: 0 }, power: 0 };
+    const e = gpuEffective(state, g);
+    if (os.hashBonus && byId[g.id].vendor === 'nvidia') {
+      return { ...e, hash: Object.fromEntries(Object.entries(e.hash).map(([a, v]) => [a, v * (1 + os.hashBonus)])) };
+    }
+    return e;
+  });
   const workingPsus = rig.psus.filter((p) => !p.broken);
-  const dcLoad = frame.basePower + eff.reduce((s, e) => s + e.power, 0);
+  const dcLoad = frame.basePower + os.overheadW + eff.reduce((s, e) => s + e.power, 0);
   const psuCapacity = workingPsus.reduce((s, p) => s + byId[p.id].watts, 0);
   const efficiency = workingPsus.length
     ? workingPsus.reduce((s, p) => s + psuEfficiency(p) * byId[p.id].watts, 0) / psuCapacity : 0.9;
-  const algo = rig.algo === 'auto' ? bestGpuAlgo(state, rig.gpus) : rig.algo;
+  const algo = rig.algo === 'auto' ? bestGpuAlgo(state, active.filter((x) => x.ok).map((x) => x.g)) : rig.algo;
   const hashrate = eff.reduce((s, e) => s + e.hash[algo], 0);
+  const deadRisers = active.filter((x, i) => rig.risers?.[i]?.broken).length;
 
   let status = 'mining';
   if (!rig.on) status = 'off';
   else if (!rig.gpus.length) status = 'no-gpu';
+  else if (!rig.boot) status = 'no-boot';
+  else if (rig.boot.broken) status = 'boot-dead';
   else if (!workingPsus.length) status = rig.psus.length ? 'psu-dead' : 'no-psu';
   else if (dcLoad > psuCapacity) status = 'overloaded';
   else if (!hashrate) status = 'gpus-dead';
@@ -206,14 +243,17 @@ export function rigStats(state, rig) {
   return {
     kind: 'rig', dcLoad, psuCapacity, psuLoadPct: psuCapacity ? dcLoad / psuCapacity : 0, efficiency,
     wallPower: running ? dcLoad / efficiency : 0, algo, hashrate: running ? hashrate : 0, potentialHashrate: hashrate,
-    unit: ALGOS[algo].unit, status, running,
+    unit: ALGOS[algo].unit, status, running, deadRisers, os: rig.os || 'linux',
+    memThrottled: eff.filter((e) => e.memThrottled).length,
+    overOsLimit: Math.max(0, rig.gpus.length - os.maxGpus),
     grossPerDay: running ? hashrate * revenuePerUnit(state, algo) : 0,
   };
 }
 
 export function rackStats(state, rack) {
   const spec = byId[rack.id];
-  const units = rack.asics.map((a) => ({ owned: a, ...asicEffective(state, a) }));
+  const heatPenalty = 1 + Math.max(0, (state.lastDeviceTemp ?? 40) - 60) * 0.0075;
+  const units = rack.asics.map((a) => { const e = asicEffective(state, a); return { owned: a, ...e, power: e.power * heatPenalty }; });
   const load = units.filter((u) => u.owned.on).reduce((s, u) => s + u.power, 0);
   const overloaded = load > spec.pduKw * 1000;
   const miners = units.map((u) => {
@@ -276,7 +316,11 @@ export function roomStats(state) {
   const asics = racks.flatMap((r) => r.miners);
   const minerWatts = [...rigs, ...asics].reduce((s, x) => s + x.wallPower, 0);
   const coolingUnits = state.cooling.filter((c) => !c.broken).map((c) => byId[c.id]);
-  const coolingCapacity = coolingUnits.reduce((s, c) => s + c.cooling, 0) * fx.cooling;
+  const humidDay = state.weather <= 0.25;   // overcast / rainy: evaporative coolers struggle
+  const rawCooling = coolingUnits.reduce((s, c) => s + c.cooling * (c.humid && humidDay ? 0.5 : 1), 0);
+  const dustLoss = 1 - 0.35 * (state.dust || 0);
+  const containment = state.facility?.[state.location]?.containment ? 1.25 : 1;
+  const coolingCapacity = rawCooling * fx.cooling * dustLoss * containment;
   const coolingWatts = minerWatts > 0 ? coolingUnits.reduce((s, c) => s + c.power, 0) : 0;
   const demandWatts = minerWatts + coolingWatts;
 
@@ -301,6 +345,7 @@ export function roomStats(state) {
     location: loc, rigs, racks, asics, minerWatts, coolingWatts, demandWatts, coolingCapacity,
     ambient, roomTemp, deviceTemp, throttle, offline, offlineReason: state.grid.offlineReason,
     tripped: state.grid.breakerTripped, circuitPct: demandWatts / (loc.circuitKw * 1000),
+    dust: state.dust || 0, containment: containment > 1,
     hashByAlgo, grossPerDay: gross, potentialGrossPerDay: [...rigs, ...asics].reduce((s, x) => s + x.grossPerDay, 0) * throttle,
     tariff: tariffUsd(state),
   };
@@ -412,6 +457,8 @@ function place(state, owned) {
     case 'frame':
       if (state.rigs.length >= loc.rigSlots) return fail(`${loc.name} has room for ${loc.rigSlots} rig(s). Move somewhere bigger.`);
       state.rigs.push({ uid: owned.uid, frameId: owned.id, gpus: [], psus: [], algo: 'auto', on: true,
+        risers: Array.from({ length: item.slots }, () => makeOwned(state, 'riser009s', 'new', 1)),
+        boot: null, os: 'linux', windowsLicensed: false,
         boughtDay: owned.boughtDay, paid: owned.paid, name: `Rig ${state.rigs.length + 1}` });
       return { ok: true };
     case 'rack':
@@ -627,7 +674,10 @@ export function sellPart(state, partUid) {
 
 function findOwned(state, itemUid) {
   const lists = [state.inventory, state.cooling, state.energy.solar, state.energy.inverters, state.energy.batteries, state.energy.generators,
-    ...state.rigs.flatMap((r) => [r.gpus, r.psus]), ...state.racks.map((r) => r.asics)];
+    ...state.rigs.flatMap((r) => [r.gpus, r.psus, r.risers || []]), ...state.racks.map((r) => r.asics)];
+  for (const rig of state.rigs) {
+    if (rig.boot?.uid === itemUid) return { list: null, owned: rig.boot, rig };
+  }
   for (const list of lists) {
     const i = list.findIndex((x) => x.uid === itemUid);
     if (i !== -1) return { list, index: i, owned: list[i] };
@@ -679,6 +729,11 @@ export function autoFill(state, rigUid) {
   const psus = state.inventory.filter((x) => byId[x.id].kind === 'psu' && !x.broken)
     .sort((a, b) => byId[b.id].watts - byId[a.id].watts);
   while (rig.psus.length < frame.psuSlots && psus.length) installPsu(state, rigUid, psus.shift().uid);
+  if (!rig.boot || rig.boot.broken) {
+    const boot = state.inventory.filter((x) => byId[x.id].kind === 'boot' && !x.broken)
+      .sort((a, b) => byId[a.id].reliability - byId[b.id].reliability)[0];
+    if (boot) installBoot(state, rigUid, boot.uid);
+  }
   const score = (g) => {
     const e = gpuEffective(state, g);
     const algo = bestGpuAlgo(state, [g]);
@@ -686,6 +741,89 @@ export function autoFill(state, rigUid) {
   };
   const gpus = state.inventory.filter((x) => byId[x.id].kind === 'gpu' && !x.broken).sort((a, b) => score(b) - score(a));
   while (rig.gpus.length < frame.slots && gpus.length) installGpu(state, rigUid, gpus.shift().uid);
+  return { ok: true };
+}
+
+export function installBoot(state, rigUid, itemUid) {
+  const rig = state.rigs.find((r) => r.uid === rigUid);
+  if (!rig) return fail('Rig not found');
+  const drive = takeFromInventory(state, itemUid, 'boot');
+  if (!drive) return fail('Boot drive not in inventory');
+  if (rig.boot) state.inventory.push(rig.boot);
+  rig.boot = drive;
+  addLog(state, 'info', `${rig.name} now boots ${OS[rig.os || 'linux'].name} from a ${byId[drive.id].name}.`);
+  return { ok: true };
+}
+
+export function swapRiser(state, rigUid, slot, itemUid) {
+  const rig = state.rigs.find((r) => r.uid === rigUid);
+  if (!rig || !rig.risers[slot]) return fail('Riser slot not found');
+  const riser = takeFromInventory(state, itemUid, 'riser');
+  if (!riser) return fail('Riser not in inventory');
+  const old = rig.risers[slot];
+  rig.risers[slot] = riser;
+  if (!old.broken) state.inventory.push(old);
+  return { ok: true };
+}
+
+export function setOs(state, rigUid, os) {
+  const rig = state.rigs.find((r) => r.uid === rigUid);
+  if (!rig || !OS[os]) return fail('Invalid');
+  if (os === 'windows' && !rig.windowsLicensed) {
+    const cost = Math.round(OS.windows.licence * effects(state).price);
+    if (state.cash < cost) return fail('Not enough cash for a Windows licence.');
+    state.cash -= cost;
+    rig.windowsLicensed = true;
+  }
+  rig.os = os;
+  addLog(state, 'info', `${rig.name} now runs ${OS[os].name}.`);
+  return { ok: true };
+}
+
+/** Apply a thermal pad kit or copper shims to a GPU (in inventory or in a rig). */
+export function applyMod(state, gpuUid, modUid) {
+  const found = findOwned(state, gpuUid);
+  if (!found || byId[found.owned.id].kind !== 'gpu') return fail('GPU not found');
+  const mi = state.inventory.findIndex((x) => x.uid === modUid && byId[x.id].kind === 'mod');
+  if (mi === -1) return fail('Kit not in inventory');
+  const mod = byId[state.inventory[mi].id];
+  const gpu = found.owned;
+  gpu.mods = gpu.mods || {};
+  if (gpu.mods[mod.id]) return fail('This card already has that mod.');
+  if (mod.needs && !gpu.mods[mod.needs]) return fail('Apply fresh thermal pads first.');
+  state.inventory.splice(mi, 1);
+  gpu.mods[mod.id] = true;
+  addLog(state, 'craft', `${mod.id === 'pads' ? 'Re-padded' : 'Copper-shimmed'} a ${byId[gpu.id].name}.`);
+  return { ok: true };
+}
+
+export function cleanCost(state) {
+  return Math.round((15 + 10 * (state.rigs.length + state.racks.length)) * effects(state).price);
+}
+export function cleanDust(state) {
+  if ((state.dust || 0) < 0.05) return fail('The room is already clean.');
+  const cost = cleanCost(state);
+  if (state.cash < cost) return fail('Not enough cash to clean.');
+  state.cash -= cost;
+  state.dust = 0;
+  addLog(state, 'info', 'Blew out the dust from every heatsink and filter.');
+  return { ok: true, cost };
+}
+
+export function facilityPrice(state, id) {
+  const f = FACILITY.find((x) => x.id === id);
+  return Math.round(f.price * location(state).roomSize * effects(state).price);
+}
+export function buyFacility(state, id) {
+  const f = FACILITY.find((x) => x.id === id);
+  if (!f) return fail('Unknown upgrade');
+  state.facility[state.location] = state.facility[state.location] || {};
+  if (state.facility[state.location][id]) return fail('Already installed here.');
+  const price = facilityPrice(state, id);
+  if (state.cash < price) return fail('Not enough cash.');
+  state.cash -= price;
+  state.facility[state.location][id] = true;
+  addLog(state, 'buy', `Installed ${f.name} in the ${location(state).name}.`);
   return { ok: true };
 }
 
@@ -721,7 +859,7 @@ export function sell(state, itemUid) {
   const found = findOwned(state, itemUid);
   if (!found) return fail('Item not found');
   if (found.owned.asics?.length) return fail('Move or sell the miners in this rack first.');
-  if (state.rigs.some((r) => r.gpus.includes(found.owned) || r.psus.includes(found.owned))) return fail('Uninstall it from the rig first.');
+  if (!found.list || state.rigs.some((r) => r.gpus.includes(found.owned) || r.psus.includes(found.owned) || (r.risers || []).includes(found.owned))) return fail('Uninstall it from the rig first.');
   found.list.splice(found.index, 1);
   const value = sellValue(state, found.owned);
   state.cash += value;
@@ -901,8 +1039,9 @@ function stepWear(state, room) {
   const wearOne = (owned, label) => {
     if (owned.broken) return;
     const q = QUALITY[owned.q || 'new'];
-    owned.cond = Math.max(0, (owned.cond ?? 1) - 0.0008 * (1 + heat) * fx.wear);
-    const p = 0.0006 * q.fail * (1 + 3 * (1 - owned.cond)) * (1 + heat) * fx.wear;
+    const padded = owned.mods?.shim ? 0.55 : owned.mods?.pads ? 0.7 : 1;
+    owned.cond = Math.max(0, (owned.cond ?? 1) - 0.0008 * (1 + heat) * fx.wear * padded);
+    const p = 0.0006 * q.fail * (1 + 3 * (1 - owned.cond)) * (1 + heat) * fx.wear * padded;
     if (rng(state) < p) {
       owned.broken = true;
       addLog(state, 'warning', `${byId[owned.id].name}${label ? ` in ${label}` : ''} has failed. Repair or salvage it.`);
@@ -912,6 +1051,27 @@ function stepWear(state, room) {
     if (!room.rigs[i].running) return;
     r.gpus.forEach((g) => wearOne(g, r.name));
     r.psus.forEach((p) => wearOne(p, r.name));
+    // Risers and boot drives fail too - cheap ones far more often.
+    (r.risers || []).forEach((riser, k) => {
+      if (riser.broken || !r.gpus[k]) return;
+      const spec = byId[riser.id];
+      if (rng(state) < 0.0007 * spec.reliability * (1 + heat) * fx.wear) {
+        riser.broken = true;
+        addLog(state, 'warning', `A PCIe riser in ${r.name} died: ${byId[r.gpus[k].id].name} dropped offline. Swap the riser.`);
+      }
+      // A SATA-powered riser can overheat its connector and start a fire.
+      if (spec.fireRisk && gpuEffective(state, r.gpus[k]).power > 60 && rng(state) < 0.0015 * spec.fireRisk * (1 + heat)) {
+        riser.broken = true;
+        r.gpus[k].broken = true;
+        if (r.gpus[k + 1] && rng(state) < 0.5) r.gpus[k + 1].broken = true;
+        r.on = false;
+        addLog(state, 'warning', `🔥 FIRE! A SATA-powered riser melted in ${r.name}. The rig is off and cards are damaged. Use 6-pin risers.`);
+      }
+    });
+    if (r.boot && !r.boot.broken && rng(state) < 0.0005 * byId[r.boot.id].reliability * fx.wear) {
+      r.boot.broken = true;
+      addLog(state, 'warning', `${r.name}'s ${byId[r.boot.id].name} failed: the rig can't boot. Replace the boot drive.`);
+    }
   });
   state.racks.forEach((rack) => rack.asics.forEach((a) => { if (a.on) wearOne(a, ''); }));
 }
@@ -946,6 +1106,7 @@ export function advance(state, hours) {
     state.day = state.hours / DAY_HOURS;
 
     const room = roomStats({ ...state, grid: { ...state.grid, offline: false } });
+    state.lastDeviceTemp = room.deviceTemp;
     const demandKw = state.grid.breakerTripped ? 0 : room.demandWatts / 1000;
     const flow = dispatchHour(state, demandKw);
 
@@ -965,7 +1126,7 @@ export function advance(state, hours) {
 
     const online = !state.grid.offline;
     const gross = online ? room.grossPerDay / DAY_HOURS : 0;
-    const t = tariffUsd(state);
+    const t = tariffUsd(state) * tariffHourMult(state);
     const gridKwh = online ? flow.gridKwh : (flow.gridUp ? flow.gridKwh - demandKw : 0);
     const gridCost = Math.max(0, gridKwh) * t;
     const dieselCost = online ? flow.generatorKwh * byId.generator.litresPerKwh * DIESEL_USD_PER_LITRE : 0;
@@ -991,6 +1152,8 @@ export function advance(state, hours) {
       stepGrid(state);
       stepEvents(state);
       stepWear(state, room);
+      const filters = state.facility?.[state.location]?.filters ? 0.4 : 1;
+      if (room.minerWatts > 0) state.dust = Math.min(1, (state.dust || 0) + 0.006 * filters * Math.min(3, 1 + room.minerWatts / 5000));
       refreshListings(state);
       if (state.day - state.power.lastBillDay >= BILL_PERIOD_DAYS) payBill(state);
       const worth = netWorth(state);
@@ -1025,8 +1188,15 @@ export function advise(state) {
   else if (room.throttle < 1 && room.minerWatts) add('warning', `Hardware at ${Math.round(room.deviceTemp)} °C is throttling to ${Math.round(room.throttle * 100)}%. Heat also wears parts out faster.`);
   if (room.circuitPct > 0.85 && !room.tripped && room.circuitPct <= 1) add('warning', `Circuit at ${Math.round(room.circuitPct * 100)}%. One more miner and the breaker goes.`);
 
+  if ((state.dust || 0) > 0.4) add('warning', `Dust has cut your cooling by ${Math.round(state.dust * 35)}%. Clean the room (and fit intake filters).`);
   room.rigs.forEach((r, i) => {
     const rig = state.rigs[i];
+    if (r.status === 'no-boot' && rig.gpus.length) add('critical', `${rig.name} has no boot drive. Install a USB flash drive or SSD so it can load its OS.`);
+    if (r.status === 'boot-dead') add('critical', `${rig.name}'s boot drive failed. Replace it.`);
+    if (r.deadRisers) add('warning', `${rig.name} has ${r.deadRisers} dead riser(s): those cards are offline.`);
+    if (r.memThrottled) add('info', `${r.memThrottled} GDDR6X card(s) in ${rig.name} are memory-throttling. Re-pad them (thermal pad kit) for ~15% more hashrate.`);
+    if (r.overOsLimit) add('warning', `${rig.name} has more GPUs than Windows supports: ${r.overOsLimit} idle. Switch to the Linux mining OS.`);
+    if ((rig.risers || []).some((x, k) => byId[x.id].fireRisk && rig.gpus[k])) add('warning', `${rig.name} uses SATA-powered risers. They can overheat and catch fire. Swap to 6-pin risers.`);
     if (r.status === 'overloaded') add('critical', `${rig.name} won't boot: ${Math.round(r.dcLoad)} W on ${r.psuCapacity} W of PSU.`);
     else if (r.status === 'no-psu' && rig.gpus.length) add('warning', `${rig.name} has GPUs but no power supply.`);
     else if (r.status === 'psu-dead') add('critical', `${rig.name}'s PSU has failed. Repair or replace it.`);
@@ -1065,8 +1235,22 @@ export function serialize(state) {
 }
 export function deserialize(text) {
   const state = JSON.parse(text);
+  if (state?.version === 2) migrateV2(state);
   if (!state || state.version !== SAVE_VERSION) throw new Error('Incompatible save');
   return state;
+}
+
+/** v2 saves (before risers and boot drives): give existing rigs basic risers and a flash drive. */
+function migrateV2(state) {
+  for (const rig of state.rigs) {
+    rig.risers = rig.risers || Array.from({ length: byId[rig.frameId].slots }, () => makeOwned(state, 'riser009s', 'new', 1));
+    rig.boot = rig.boot === undefined ? makeOwned(state, 'usb16', 'new', 1) : rig.boot;
+    rig.os = rig.os || 'linux';
+  }
+  state.dust = state.dust || 0;
+  state.facility = state.facility || {};
+  state.tariffPlan = state.tariffPlan || 'standard';
+  state.version = 3;
 }
 
 export function allOwned(state) {
@@ -1074,7 +1258,7 @@ export function allOwned(state) {
     ...state.inventory, ...state.cooling,
     ...state.energy.solar, ...state.energy.inverters, ...state.energy.batteries, ...state.energy.generators,
     ...state.racks, ...state.racks.flatMap((r) => r.asics),
-    ...state.rigs.flatMap((r) => [...r.gpus, ...r.psus, { id: r.frameId, boughtDay: r.boughtDay }]),
+    ...state.rigs.flatMap((r) => [...r.gpus, ...r.psus, ...(r.risers || []).filter((x) => !x.broken), ...(r.boot ? [r.boot] : []), { id: r.frameId, boughtDay: r.boughtDay }]),
   ];
 }
 
