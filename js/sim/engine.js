@@ -727,13 +727,14 @@ export function autoFill(state, rigUid) {
   const rig = state.rigs.find((r) => r.uid === rigUid);
   if (!rig) return fail('Rig not found');
   const frame = byId[rig.frameId];
+  const added = { psus: 0, gpus: 0, boot: 0 };
   const psus = state.inventory.filter((x) => byId[x.id].kind === 'psu' && !x.broken)
     .sort((a, b) => byId[b.id].watts - byId[a.id].watts);
-  while (rig.psus.length < frame.psuSlots && psus.length) installPsu(state, rigUid, psus.shift().uid);
+  while (rig.psus.length < frame.psuSlots && psus.length) if (installPsu(state, rigUid, psus.shift().uid).ok) added.psus++;
   if (!rig.boot || rig.boot.broken) {
     const boot = state.inventory.filter((x) => byId[x.id].kind === 'boot' && !x.broken)
       .sort((a, b) => byId[a.id].reliability - byId[b.id].reliability)[0];
-    if (boot) installBoot(state, rigUid, boot.uid);
+    if (boot && installBoot(state, rigUid, boot.uid).ok) added.boot++;
   }
   const score = (g) => {
     const e = gpuEffective(state, g);
@@ -741,8 +742,12 @@ export function autoFill(state, rigUid) {
     return e.hash[algo] * revenuePerUnit(state, algo) - (e.power / 900) * DAY_HOURS * tariffUsd(state);
   };
   const gpus = state.inventory.filter((x) => byId[x.id].kind === 'gpu' && !x.broken).sort((a, b) => score(b) - score(a));
-  while (rig.gpus.length < frame.slots && gpus.length) installGpu(state, rigUid, gpus.shift().uid);
-  return { ok: true };
+  while (rig.gpus.length < frame.slots && gpus.length) if (installGpu(state, rigUid, gpus.shift().uid).ok) added.gpus++;
+  if (!added.psus && !added.gpus && !added.boot) {
+    const full = rig.gpus.length >= frame.slots && rig.psus.length >= frame.psuSlots && rig.boot;
+    return fail(full ? 'This rig is already full' : 'Nothing in your inventory fits this rig. Buy GPUs, a PSU or a boot drive first.');
+  }
+  return { ok: true, added };
 }
 
 export function installBoot(state, rigUid, itemUid) {

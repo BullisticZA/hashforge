@@ -170,7 +170,12 @@ export class App {
         break;
       }
       case 'uninstall': if (this.result(E.uninstall(s, a.arg, a.uid))) this.refreshOverlay(); break;
-      case 'autofill': if (this.result(E.autoFill(s, a.uid), 'Rig filled from inventory')) this.refreshOverlay(); break;
+      case 'autofill': {
+        const r = E.autoFill(s, a.uid);
+        const bits = r.ok ? [r.added.gpus && `${r.added.gpus} GPU${r.added.gpus > 1 ? 's' : ''}`, r.added.psus && `${r.added.psus} PSU${r.added.psus > 1 ? 's' : ''}`, r.added.boot && 'a boot drive'].filter(Boolean) : [];
+        if (this.result(r, r.ok ? `Installed ${bits.join(', ')}` : '')) this.refreshOverlay();
+        break;
+      }
       case 'toggle': this.result(E.toggle(s, a.uid)); this.refreshOverlay(); break;
       case 'algo': this.result(E.setRigAlgo(s, a.uid, a.value)); break;
       case 'repair': {
@@ -335,15 +340,17 @@ export class App {
       const st = E.rigStats(s, rig);
       el.innerHTML = `<div class="card"><div class="spread"><h3>${esc(rig.name)}: ${esc(byId[rig.frameId].name)}</h3>
         <div class="row"><button class="btn primary" data-action="open-rig" data-uid="${rig.uid}">🔧 Open in 3D workshop</button>
+        <button class="btn" data-action="autofill" data-uid="${rig.uid}" title="Install the best GPUs, PSUs and a boot drive from your inventory">⚡ Auto-fill</button>
         <button class="btn" data-action="toggle" data-uid="${rig.uid}">${rig.on ? 'Switch off' : 'Switch on'}</button></div></div>
         <div class="kv" style="margin-top:8px">
           <span>Status</span><span class="${st.running ? 'good' : 'bad'}">${st.status.replace('-', ' ')}</span>
+          <span>Slots</span><span>${rig.gpus.length} / ${byId[rig.frameId].slots} GPUs · ${rig.psus.length} / ${byId[rig.frameId].psuSlots} PSUs · ${rig.boot ? 'boot drive fitted' : '<span class="bad">no boot drive</span>'}</span>
           <span>Hashrate</span><span>${hashrate(st.potentialHashrate, st.unit)} on ${ALGOS[st.algo].name}</span>
           <span>PSU load</span><span class="${st.psuLoadPct > 1 ? 'bad' : st.psuLoadPct > 0.85 ? 'warn' : ''}">${Math.round(st.dcLoad)} W / ${st.psuCapacity} W (${Math.round(st.psuLoadPct * 100)}%)</span>
           <span>Wall power</span><span>${kw(st.dcLoad / st.efficiency)} at ${Math.round(st.efficiency * 100)}% efficiency</span>
           <span>Earning</span><span>${m(st.grossPerDay)} / day before power</span>
           <span>Algorithm</span><span><select data-change="algo" data-uid="${rig.uid}">${['auto', ...GPU_ALGOS].map((a) => `<option value="${a}" ${rig.algo === a ? 'selected' : ''}>${a === 'auto' ? 'Auto (most profitable)' : `${ALGOS[a].name} (${ALGOS[a].coin})`}</option>`).join('')}</select></span>
-        </div></div>`;
+        </div></div>${this.rigPartsHtml(rig, st)}`;
     } else if (sel.type === 'rack') {
       const rack = s.racks.find((r) => r.uid === sel.uid);
       if (!rack) { this.selection = null; return; }
@@ -369,6 +376,37 @@ export class App {
       <div class="card"><h3>Today</h3><div class="kv"><span>Mining</span><span class="good">${m(r.grossPerDay)}/day</span><span>Power</span><span class="bad">${m(r.demandWatts / 1000 * 24 * r.tariff)}/day</span><span>Net worth</span><span>${m(E.netWorth(this.state))}</span></div></div>
       <div class="card"><h3>Room</h3><div class="kv"><span>Dust</span><span class="${r.dust > 0.4 ? 'warn' : ''}">${Math.round(r.dust * 100)}% <button class="btn" style="padding:2px 8px" data-action="clean">Clean ${m(E.cleanCost(this.state))}</button></span><span>Room temp</span><span>${r.roomTemp.toFixed(1)} °C</span><span>Cooling</span><span>${kw(r.coolingCapacity)} of ${kw(r.minerWatts)} heat</span><span>Circuit</span><span class="${r.circuitPct > 0.9 ? 'bad' : ''}">${Math.round(r.circuitPct * 100)}%</span><span>Throttle</span><span class="${r.throttle < 1 ? 'warn' : ''}">${Math.round(r.throttle * 100)}%</span></div></div>
     </div>`;
+  }
+
+  /** Installed parts and matching inventory for a rig, so it can be built without opening 3D. */
+  rigPartsHtml(rig, st) {
+    const s = this.state;
+    const frame = byId[rig.frameId];
+    const algo = st.algo; const unit = ALGOS[algo].unit;
+    const gpuInfo = (g) => { const e = E.gpuEffective(s, g); return { h: e.hash[algo] || 0, w: e.power }; };
+    const row = (o, info, btn) => `<div class="part-row${o.broken ? ' dead' : ''}"><span class="name">${esc(byId[o.id].name)}</span>${this.gradeTag(o.q)}
+      <span class="small muted">${info}</span><span class="small muted">${Math.round((o.cond ?? 1) * 100)}%${o.broken ? ' · <span class="bad">failed</span>' : ''}</span>${btn}</div>`;
+    const gpuRow = (g, btn) => { const i = gpuInfo(g); return row(g, `${hashrate(i.h, unit)} · ${Math.round(i.w)} W`, btn); };
+    const psuRow = (p, btn) => row(p, `${byId[p.id].watts} W · ${Math.round(E.psuEfficiency(p) * 100)}%`, btn);
+    const bootRow = (b, btn) => row(b, esc(byId[b.id].style === 'usb' ? 'USB flash' : byId[b.id].style === 'nvme' ? 'M.2 NVMe' : 'SATA SSD'), btn);
+    const remove = (o) => `<button class="btn small-btn" data-action="uninstall" data-arg="${rig.uid}" data-uid="${o.uid}">Remove</button>`;
+    const add = (o, full, action = 'install', label = 'Add') => `<button class="btn primary small-btn" data-action="${action}" data-arg="${rig.uid}" data-uid="${o.uid}" ${full || o.broken ? 'disabled' : ''}>${label}</button>`;
+    const gpusFull = rig.gpus.length >= frame.slots; const psusFull = rig.psus.length >= frame.psuSlots;
+    const spareGpus = s.inventory.filter((o) => byId[o.id].kind === 'gpu').sort((a, b) => gpuInfo(b).h - gpuInfo(a).h);
+    const sparePsus = s.inventory.filter((o) => byId[o.id].kind === 'psu').sort((a, b) => byId[b.id].watts - byId[a.id].watts);
+    const spareBoot = s.inventory.filter((o) => byId[o.id].kind === 'boot');
+    const empty = (t) => `<div class="small muted">${t}</div>`;
+    return `<div class="parts-grid">
+      <div class="card"><h3>In this rig</h3>
+        <div class="part-head">GPUs ${rig.gpus.length}/${frame.slots}</div>${rig.gpus.map((g) => gpuRow(g, remove(g))).join('') || empty('No GPUs yet.')}
+        <div class="part-head">PSUs ${rig.psus.length}/${frame.psuSlots}</div>${rig.psus.map((p) => psuRow(p, remove(p))).join('') || empty('No PSU: the rig has no power.')}
+        <div class="part-head">Boot drive</div>${rig.boot ? bootRow(rig.boot, '') : empty('<span class="bad">None: the rig cannot boot.</span>')}
+      </div>
+      <div class="card"><h3>Available in inventory</h3>
+        <div class="part-head">GPUs (${spareGpus.length})${gpusFull ? ' · rig full' : ''}</div>${spareGpus.map((g) => gpuRow(g, add(g, gpusFull))).join('') || empty('No spare GPUs. Buy some from Vendors, Used or build one on the Workbench.')}
+        <div class="part-head">PSUs (${sparePsus.length})${psusFull ? ' · PSU slots full' : ''}</div>${sparePsus.map((p) => psuRow(p, add(p, psusFull))).join('') || empty('No spare PSUs.')}
+        <div class="part-head">Boot drives (${spareBoot.length})</div>${spareBoot.map((b) => bootRow(b, add(b, false, 'install-boot', rig.boot ? 'Swap' : 'Add'))).join('') || empty('No spare boot drives.')}
+      </div></div>`;
   }
 
   gradeTag(q) {
