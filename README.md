@@ -28,6 +28,8 @@ Start in a bedroom corner with a little savings and a dream. Buy a rig kit, a po
 | **Junkyard:** open lots, find parts, hunt golden samples | **Load-shedding:** the lights die, fans stop, the money stops |
 | <img src="assets/screens/rig-cables.jpg" alt="Risers and cabling"> | <img src="assets/screens/room.jpg" alt="3D tour"> |
 | **Risers & cabling:** every card on a riser, USB to the motherboard, PCIe power into each socket | **3D tour:** walk your whole operation |
+| <img src="assets/screens/career.jpg" alt="Career page"> | <img src="assets/screens/floor.jpg" alt="Events and contracts"> |
+| **Career:** levels, ranks, contracts, badges and a daily streak | **Events:** side jobs, storms, power deals and more, with a choice to make |
 
 ## ✨ Features
 
@@ -39,6 +41,7 @@ Start in a bedroom corner with a little savings and a dream. Buy a rig kit, a po
   - **Rig parts and mods:** 7 riser types, 7 boot drives, thermal pads, copper shims, fresh thermal paste and replacement fans
 - Shop **search and sort** by profit, payback time, price or release year
 - **Side business: hosting.** Build mini PCs, NAS boxes, towers and rack servers from parts that have to match (socket, memory type, bays, SATA/SAS, M.2, PSU), then host websites, game servers, email, backups, CCTV recording, render nodes, ERP databases and VPS blocks for clients. Keep uptime above their SLA, protect their data with mirrored drives, ride out load-shedding with a UPS, and grow your reputation to unlock bigger clients
+- **Career:** level up from Bedroom Miner to Satoshi's Heir, take **contracts** for cash and XP, make calls on **random events** (storms, pool promos, power deals, side jobs, meme coins...), unlock **35 badges** and keep a **daily streak** going
 - **Save slots**, plus download and upload your save as a file
 - **Goals** that walk you through your first rig, then endless profit milestones that double each time, with cash rewards
 - **Build from the Floor:** click a rig to see what's in it and what's in your inventory, add or remove parts, or Auto-fill. New purchases install themselves into a rig with room
@@ -55,7 +58,7 @@ Start in a bedroom corner with a little savings and a dream. Buy a rig kit, a po
 - **Advisor** that spots problems: overloaded PSUs, unprofitable miners, inverter limits, heat
 - Saves automatically in your browser. No account, no install, works offline
 
-See the [ROADMAP](ROADMAP.md) for what's next: PC and server building, networking and firewalls, hosting for clients, and much more.
+See the [ROADMAP](ROADMAP.md) for what's next: a workshop with tools, networking and firewalls, more sites and staff, and much more.
 
 ## 🕹️ Controls
 
@@ -65,7 +68,8 @@ See the [ROADMAP](ROADMAP.md) for what's next: PC and server building, networkin
 | `1`–`4` | Game speed (1, 6, 24, 96 game hours per second) |
 | Click a rig or rack | Manage it; **Open in 3D workshop** to install parts |
 | 🎥 3D Tour | Walk around your whole operation in 3D |
-| `Esc` | Close a 3D view |
+| `Esc` | Close a 3D view or the start screen |
+| 🔊 | Sound on / off |
 
 ## 🛠️ Run it locally
 

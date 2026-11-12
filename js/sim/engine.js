@@ -81,7 +81,8 @@ export function newGame(seed = Date.now() % 2147483647, options = {}) {
     lastDeviceTemp: 40,
     mods: { gpuPrice: 1, asicPrice: 1, ambient: 0, ambientDaysLeft: 0 },
     power: { gridKwh: 0, gridCost: 0, dieselCost: 0, lastBillDay: 0 },
-    stats: { minedUsd: 0, powerPaid: 0, bestDay: 0, earnedToday: 0, costToday: 0, crafted: 0, lotsOpened: 0, goldens: 0 },
+    stats: { minedUsd: 0, powerPaid: 0, bestDay: 0, earnedToday: 0, costToday: 0, crafted: 0, lotsOpened: 0, goldens: 0, bought: 0, sold: 0, repaired: 0, signed: 0, onlineHours: 0 },
+    buffs: [],
     goals: { done: [], tier: 0 },
     log: [],
     prestige,
@@ -99,7 +100,7 @@ const newUid = (state) => `u${state.nextUid++}`;
 export const location = (state) => LOCATIONS.find((l) => l.id === state.location);
 export const region = (state) => REGIONS.find((r) => r.id === state.region);
 
-function addLog(state, type, text) {
+export function addLog(state, type, text) {
   const top = state.log[0];
   // The same message again (an outage every day, say) bumps a counter instead of flooding the log.
   if (top && top.type === type && top.text === text) { top.count = (top.count || 1) + 1; top.day = state.day; return; }
@@ -112,7 +113,7 @@ const fail = (error) => ({ ok: false, error });
 
 export function effects(state) {
   const L = (id) => state.prestige.upgrades[id] || 0;
-  return {
+  const out = {
     hash: 1 + 0.03 * L('firmware'),
     tariff: Math.max(0.35, 0.96 ** L('contracts')),
     price: Math.max(0.4, 0.97 ** L('haggler')),
@@ -121,6 +122,14 @@ export function effects(state) {
     cooling: 1 + 0.06 * L('thermal'),
     wear: 0.92 ** L('durable'),
   };
+  // Short-lived boosts from events (a pool promo, a fixed-rate power deal...)
+  for (const b of state.buffs || []) {
+    if (b.untilDay <= state.day) continue;
+    if (b.kind === 'hash') out.hash *= b.mult;
+    if (b.kind === 'tariff') out.tariff *= b.mult;
+    if (b.kind === 'price') out.price *= b.mult;
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ money
@@ -525,6 +534,7 @@ export function buy(state, itemId) {
   const placed = place(state, owned);
   if (!placed.ok) { state.nextUid--; return placed; }
   state.cash -= price;
+  state.stats.bought = (state.stats.bought || 0) + 1;
   addLog(state, 'buy', `Bought a new ${item.name}.`);
   return { ok: true, uid: owned.uid, price };
 }
@@ -560,6 +570,7 @@ export function buyListing(state, listingId) {
   if (!placed.ok) return placed;
   state.cash -= l.price;
   state.listings.splice(i, 1);
+  state.stats.bought = (state.stats.bought || 0) + 1;
   addLog(state, 'buy', `Bought a ${QUALITY[l.q].name.toLowerCase()} ${byId[l.itemId].name} second-hand.`);
   return { ok: true, uid: owned.uid };
 }
@@ -886,6 +897,7 @@ export function repair(state, itemUid) {
   state.cash -= cost;
   o.broken = false;
   o.cond = Math.max(o.cond ?? 1, o.q === 'scrap' ? 0.7 : 0.97);
+  state.stats.repaired = (state.stats.repaired || 0) + 1;
   addLog(state, 'info', `Repaired ${byId[o.id].name}.`);
   return { ok: true, cost };
 }
@@ -898,6 +910,7 @@ export function sell(state, itemUid) {
     state.rigs.splice(ri, 1);
     const value = sellValue(state, { id: rig.frameId, boughtDay: rig.boughtDay });
     state.cash += value;
+    state.stats.sold = (state.stats.sold || 0) + 1;
     return { ok: true, value };
   }
   const si = (state.servers || []).findIndex((m) => m.uid === itemUid);
@@ -908,6 +921,7 @@ export function sell(state, itemUid) {
     const value = parts.reduce((t, o) => t + sellValue(state, o), 0);
     state.servers.splice(si, 1);
     state.cash += value;
+    state.stats.sold = (state.stats.sold || 0) + 1;
     addLog(state, 'sell', `Sold ${m.name} with everything in it for {{usd:${value}}}.`);
     return { ok: true, value };
   }
@@ -919,6 +933,7 @@ export function sell(state, itemUid) {
   found.list.splice(found.index, 1);
   const value = sellValue(state, found.owned);
   state.cash += value;
+  state.stats.sold = (state.stats.sold || 0) + 1;
   addLog(state, 'sell', `Sold ${byId[found.owned.id].name} for {{usd:${value}}}.`);
   return { ok: true, value };
 }
@@ -990,6 +1005,7 @@ export function hardFork(state) {
     bestNetWorth: Math.max(state.prestige.bestNetWorth, worth),
   };
   const next = newGame((state.seed * 7 + 13) % 2147483647, { prestige, region: state.region, tariffLocal: state.tariffLocal, fx: state.fx });
+  if (state.career) next.career = { ...state.career, jobs: [], event: null, lastDay: 0, lastEarned: 0, nextEventDay: 2 };   // your level and badges carry into the new era
   return { ok: true, state: next, reward };
 }
 
@@ -1198,6 +1214,7 @@ export function advance(state, hours) {
 
     state.cash += gross;
     state.stats.minedUsd += gross;
+    if (gross > 0) state.stats.onlineHours = (state.stats.onlineHours || 0) + 1;
     state.stats.earnedToday += gross;
     state.stats.costToday += gridCost + dieselCost;
     state.power.gridKwh += Math.max(0, gridKwh);
@@ -1515,6 +1532,7 @@ export function acceptOffer(state, offerId, serverUid) {
   state.offers.splice(i, 1);
   const client = { ...offer, id: `C${newUid(state)}`, serverUid: m.uid, startDay: state.day, endDay: state.day + offer.months * 30, satisfaction: 0.8, upToday: 0, hoursToday: 0, paid: 0 };
   state.clients.push(client);
+  state.stats.signed = (state.stats.signed || 0) + 1;
   addLog(state, 'milestone', `New client: ${client.client} (${CLIENT_TYPES.find((t) => t.id === client.typeId).name}) on ${m.name}. {{usd:${client.payMonthly}}}/month.`);
   return { ok: true, client };
 }

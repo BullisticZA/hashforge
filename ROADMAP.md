@@ -53,27 +53,36 @@ a sensible start should *usually* make money in the first game-year, but never g
 - **Difficulty follows price** with a lag instead of only climbing: earnings swing up and down and recover after slumps, with a slow ~4.5%/year squeeze. Old saves are re-based
 - **UPS units also carry mining rigs** for part of an outage, after servers
 
-## 🔜 v0.3: Builders & Workshop
+## ✅ v0.3: Career update
+- **Levels and ranks:** earn XP from mining, hosting, contracts, events and badges. Climb 10 ranks from Bedroom Miner to Satoshi's Heir; every level pays a cash bonus
+- **Contract board:** 3 to 6 short contracts at a time (mine an amount, keep uptime, open lots, sign a client, hit a profit target...), with cash and XP; new ones arrive every morning
+- **Random events with choices:** a neighbour selling a GPU, lightning storms, pool promos, fixed-rate power deals, side jobs, meme coins, cable thieves, rival miners quitting, the cat on the rig...
+- **35 badges** with rewards, and a **Career** page with your level, rank ladder, active boosts, badges and lifetime stats
+- **Daily bonus** with a streak that grows for 14 days, on a new start screen with a "while you were away" report
+- **Short boosts** from events (+8% earnings, cheaper power, vendor sales) shown in the top bar
+- Fresh look: glassy panels, level ring in the top bar, cash that counts up, floating income on the floor, confetti and level-up banners, synthesised sound effects (mute button in the top bar)
+
+## 🔜 v0.4: Builders & Workshop
 - **Thermal work:** repaste, new thermal pads, copper shims and plates: lower temps, less wear, more hashrate
 - **Workshop tools:** screwdriver kit, multimeter, thermal camera, reflow station, BIOS programmer. Better tools unlock better repairs
 - Junkyard and used-market server parts: pull Xeons, ECC RAM and SAS drives from decommissioned servers
-- One-off IT gigs: build a gaming PC for a client, repair a laptop, set up an office NAS
+- Bigger IT gigs: build a gaming PC to a client's spec, repair a laptop on the bench, set up an office NAS
 - CPU mining (RAM- and cache-hungry) and **storage mining** (proof of space: plot and farm on your drives)
 - Many more junkyard part types and data-centre clearout lots
 
-## 🔜 v0.4: Network & Security
+## 🔜 v0.5: Network & Security
 - Switches, routers, cabling and uplinks; bandwidth and latency matter for pools
 - **Firewalls** and security upgrades; hacking attempts, malware and ransomware events
 - Remote monitoring and alerts
 
-## 🔜 v0.5: Empire & IT Partner
+## 🔜 v0.6: Empire & IT Partner
 - **Host for clients:** websites, storage, backups, design and IT services on monthly contracts, where uptime matters
 - Buy and expand **homes, warehouses and data halls**; several sites at once
 - **UPS systems**, three-phase power, transformers, grid contracts
 - Staff: technicians who repair, guards, network admins
 
-## 🔜 v0.6+: Endless
+## 🔜 v0.7+: Endless
 - Research tree, contracts and customer orders
 - Overclocking and undervolting
-- Achievements, seasonal events, rotating challenges
+- Seasonal events and rotating weekly challenges
 - More prestige layers and rarer hardware tiers

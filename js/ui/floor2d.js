@@ -8,8 +8,12 @@ const COLORS = {
 };
 
 export class FloorPlan {
-  constructor(canvas, { onSelect } = {}) {
+  constructor(canvas, { onSelect, money } = {}) {
     this.canvas = canvas;
+    this.money = money || ((v) => v.toFixed(2));
+    this.speed = 1;          // game hours per real second, set by the app
+    this.pops = [];          // floating "+R" income numbers
+    this.lastSpawn = 0;
     this.ctx = canvas.getContext('2d');
     this.onSelect = onSelect;
     this.hits = [];
@@ -32,6 +36,7 @@ export class FloorPlan {
     // Scale tiles with the screen so small rooms don't look empty on big monitors.
     const s = dpr * Math.min(1.7, Math.max(0.8, c.clientWidth / 820));
     this.hits = [];
+    const spots = [];
     ctx.clearRect(0, 0, W, H);
 
     // Floor
@@ -110,6 +115,7 @@ export class FloorPlan {
       ctx.fillStyle = '#8fa3c4'; ctx.font = `${9 * s}px Inter, system-ui`;
       ctx.fillText('PSU', px + 5 * s, y + 34 * s);
       this.hits.push({ x, y, w, h, pick: { type: 'rig', uid: rig.uid } });
+      if (st.running) spots.push({ x: x + w / 2, y: y + 10 * s, v: st.grossPerDay, c: '#5ee7ff' });
       x += w + 12 * s;
     });
     // Empty rig slots
@@ -146,6 +152,8 @@ export class FloorPlan {
         }
       }
       this.hits.push({ x: fx + 10 * s, y: ry, w, h, pick: { type: 'rack', uid: rack.uid } });
+      const rackGross = st.miners.reduce((t, m) => t + (m.running ? m.grossPerDay : 0), 0);
+      if (rackGross > 0) spots.push({ x: fx + 10 * s + w / 2, y: ry + 10 * s, v: rackGross, c: '#5ee7ff' });
       ry += h + 10 * s;
     });
     if (state.racks.length < loc.rackSlots) {
@@ -226,6 +234,7 @@ export class FloorPlan {
         ctx.fillRect(sx + 8 * s + k * 9 * s, sy + 38 * s, 6 * s, 6 * s);
       }
       this.hits.push({ x: sx, y: sy, w: sw, h: sh, pick: { type: 'server', uid: m.uid } });
+      if (up && st.payPerDay > 0) spots.push({ x: sx + sw / 2, y: sy, v: st.payPerDay, c: '#ffd166' });
       sx += sw + 8 * s;
     });
     if (servers.length < loc.serverSlots && sx + sw <= zoneRight - 6 * s) {
@@ -244,9 +253,35 @@ export class FloorPlan {
       const msg = `⚠ ${room.offlineReason || 'Power down'}`;
       ctx.fillText(msg, fx + fw / 2 - ctx.measureText(msg).width / 2, fy + fh - 24 * s);
     }
+    this.drawPops(ctx, spots, time, s, dark);
     // Location label
     ctx.fillStyle = '#4c638a'; ctx.font = `700 ${11 * s}px Inter, system-ui`;
     ctx.fillText(loc.name.toUpperCase(), fx + 8 * s, fy + fh - 8 * s);
+  }
+
+  /** Income floats up from whatever is earning, sized to what it made since the last pop. */
+  drawPops(ctx, spots, time, s, dark) {
+    const every = 1.1;
+    if (!dark && this.speed > 0 && spots.length && time - this.lastSpawn > every) {
+      const elapsed = Math.min(3, time - this.lastSpawn);
+      this.lastSpawn = time;
+      const spot = spots[Math.floor(Math.random() * spots.length)];
+      const earned = (spot.v / 24) * this.speed * elapsed * spots.length;   // one pop stands for the whole floor
+      if (earned > 0.0005) this.pops.push({ x: spot.x + (Math.random() - 0.5) * 30 * s, y: spot.y, t0: time, text: `+${this.money(earned)}`, c: spot.c });
+    }
+    if (this.speed === 0) this.lastSpawn = time;
+    this.pops = this.pops.filter((p) => time - p.t0 < 1.8);
+    for (const p of this.pops) {
+      const k = (time - p.t0) / 1.8;
+      ctx.globalAlpha = Math.max(0, 1 - k * k);
+      ctx.font = `800 ${13 * s}px Inter, system-ui`;
+      ctx.fillStyle = p.c;
+      ctx.shadowColor = p.c; ctx.shadowBlur = 10 * s;
+      const tw = ctx.measureText(p.text).width;
+      ctx.fillText(p.text, p.x - tw / 2, p.y - k * 46 * s);
+      ctx.shadowBlur = 0;
+    }
+    ctx.globalAlpha = 1;
   }
 
   panel(x, y, w, h, selected, fill) {

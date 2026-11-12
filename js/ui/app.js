@@ -7,6 +7,9 @@ import {
 } from '../data/catalog.js';
 import { QUALITY, JUNK_LOTS, UPGRADES, upgradeCost, forkThreshold, forkReward, CRAFT_FEE, PART_TYPES } from '../data/progression.js';
 import * as E from '../sim/engine.js';
+import * as C from '../sim/career.js';
+import { sfx, soundOn, setSound } from './sfx.js';
+import { confetti, banner } from './celebrate.js';
 import { FloorPlan } from './floor2d.js';
 import { detectRegion, fetchFx, makeMoney, num, hashrate, kw, gameDate, esc } from './format.js';
 
@@ -20,7 +23,7 @@ const NAV = [
   ['Run', [['floor', '🏭', 'Floor'], ['servers', '🖥️', 'Servers'], ['clients', '🤝', 'Clients'], ['power', '⚡', 'Power']]],
   ['Buy', [['shop', '🛒', 'Vendors'], ['used', '♻️', 'Used'], ['junk', '🗑️', 'Junkyard']]],
   ['Build', [['bench', '🛠️', 'Workbench'], ['inventory', '📦', 'Inventory']]],
-  ['Grow', [['market', '📈', 'Market'], ['fork', '🔱', 'Hard Fork'], ['settings', '⚙️', 'Settings']]],
+  ['Grow', [['career', '🏆', 'Career'], ['market', '📈', 'Market'], ['fork', '🔱', 'Hard Fork'], ['settings', '⚙️', 'Settings']]],
 ];
 const SHOP_TABS = [
   ['gpu', 'GPUs', GPUS], ['asic', 'ASIC miners', ASICS], ['frame', 'Rig kits', FRAMES], ['psu', 'Power supplies', PSUS],
@@ -41,6 +44,9 @@ export class App {
     this.bench = {};
     this.lastRender = 0;
     this.load();
+    C.ensure(this.state);
+    C.tick(this.state);               // settle XP and badges from before this session quietly
+    this.cashShown = this.state.cash;
     this.money = makeMoney(this.state);
     this.renderNav();
     this.bindEvents();
@@ -48,6 +54,7 @@ export class App {
     this.updateFx();
     this.lastFrame = performance.now();
     requestAnimationFrame((t) => this.loop(t));
+    this.showStart();
     setInterval(() => this.save(), 10000);
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.save(); });
   }
@@ -97,7 +104,13 @@ export class App {
       if (this.state.log[0] !== logBefore) this.announce(this.state.log[0]);
     }
     this.room = E.roomStats(this.state);
-    if (this.floor && this.view === 'floor') this.floor.draw(this.state, this.room, now / 1000);
+    if (this.floor && this.view === 'floor') { this.floor.speed = speed; this.floor.draw(this.state, this.room, now / 1000); }
+    // Cash counts up (or down) smoothly instead of jumping.
+    const cash = this.state.cash;
+    this.cashShown += (cash - this.cashShown) * Math.min(1, dt * 6);
+    if (Math.abs(cash - this.cashShown) < 0.005) this.cashShown = cash;
+    const cashEl = document.getElementById('hud-cash');
+    if (cashEl) { const t = this.money(this.cashShown); if (cashEl.textContent !== t) cashEl.textContent = t; }
     if (this.tour) this.tour.sync(this.state, this.room, E.location(this.state));
     if (now - this.lastRender > 400) { this.lastRender = now; this.render(); }
     requestAnimationFrame((t) => this.loop(t));
@@ -115,6 +128,7 @@ export class App {
 
   toast(text, kind = '') {
     text = this.fmt(text);
+    if (kind === 'bad') sfx.bad();
     const el = document.createElement('div');
     el.className = `toast ${kind}`;
     el.textContent = text;
@@ -139,6 +153,7 @@ export class App {
       const el = e.target.closest('[data-action]');
       if (!el) return;
       const { action, id, uid, arg } = el.dataset;
+      sfx.click();
       this.act(action, { id, uid, arg, el });
     });
     document.addEventListener('change', (e) => {
@@ -150,7 +165,7 @@ export class App {
     document.addEventListener('keydown', (e) => {
       if (e.target.matches('input, select, textarea')) return;
       if (e.key === ' ') { e.preventDefault(); this.speedIndex = this.speedIndex ? 0 : 1; this.render(true); }
-      if (e.key === 'Escape') this.closeOverlay();
+      if (e.key === 'Escape') { this.closeOverlay(); this.closeStart(); }
       if (/^[1-4]$/.test(e.key)) { this.speedIndex = +e.key; this.render(true); }
     });
   }
@@ -299,6 +314,41 @@ export class App {
       case 'import-save': $('#import-file')?.click(); break;
       case 'explode': this.viewer?.setExploded(a.el.classList.toggle('on')); break;
       case 'close-overlay': this.closeOverlay(); break;
+      // ---- career
+      case 'claim-job': {
+        const r = C.claimJob(s, a.id);
+        if (!r.ok) { this.toast(r.error, 'bad'); break; }
+        sfx.coin();
+        const box = a.el.getBoundingClientRect();
+        confetti({ x: (box.left + box.width / 2) / innerWidth, y: box.top / innerHeight, count: 40, spread: 0.6 });
+        this.toast(`💼 Contract paid: +{{usd:${r.job.reward}}} and ${r.job.xp} XP`, 'gold');
+        this.celebrate({ levelUps: r.levelUps });
+        this.render(true);
+        break;
+      }
+      case 'drop-job': C.dropJob(s, a.id); this.render(true); break;
+      case 'event-choice': {
+        const r = C.resolveEvent(s, +a.arg);
+        if (!r.ok) { this.toast(r.error, 'bad'); break; }
+        if (r.uid) this.autoInstall(r.uid);
+        this.toast(r.text, r.bad ? 'bad' : 'good');
+        if (!r.bad) sfx.coin();
+        this.celebrate({ levelUps: r.levelUps });
+        this.render(true);
+        break;
+      }
+      case 'daily-claim': {
+        const r = C.claimDaily(s, this.today());
+        if (!r.ok) { this.toast(r.error, 'bad'); break; }
+        sfx.badge(); confetti({ count: 160 });
+        this.toast(`🔥 Day ${r.count} streak: +{{usd:${r.cash}}} and ${r.xp} XP`, 'gold');
+        this.celebrate({ levelUps: r.levelUps });
+        this.closeStart();
+        this.render(true);
+        break;
+      }
+      case 'start-play': this.closeStart(); break;
+      case 'sound': setSound(!soundOn()); if (soundOn()) sfx.coin(); this.render(true); break;
       default: break;
     }
   }
@@ -312,8 +362,10 @@ export class App {
   render(force = false) {
     if (!force && (this.pointerDown || document.activeElement?.matches('input, select'))) return;
     this.room = E.roomStats(this.state);
-    for (const g of E.checkGoals(this.state, this.room)) this.toast(`🎯 Goal complete: ${g.title} (+{{usd:${g.reward}}})`, 'gold');
+    for (const g of E.checkGoals(this.state, this.room)) { this.toast(`🎯 Goal complete: ${g.title} (+{{usd:${g.reward}}})`, 'gold'); sfx.coin(); }
+    if (!this.startOpen) this.celebrate(C.tick(this.state, this.room));
     this.renderHud();
+    this.renderEvent();
     this.renderMain(force);
     this.renderSide();
   }
@@ -325,23 +377,36 @@ export class App {
 
   renderHud() {
     const s = this.state; const r = this.room || E.roomStats(s); const m = this.money;
+    const c = C.ensure(s);
     const hosting = E.hostingPerDay(s);
     const profit = r.grossPerDay + hosting - r.demandWatts / 1000 * 24 * r.tariff * (r.offline ? 0 : 1);
     const reg = E.region(s);
     const shedding = reg.loadShedding && s.grid.stage > 0;
+    const xpFrac = c.xp / C.xpToNext(c.level);
+    const buffs = (s.buffs || []).filter((b) => b.untilDay > s.day);
+    const tile = (label, value, cls = '', title = '') => `<div class="stat"${title ? ` title="${esc(title)}"` : ''}><span>${label}</span><b class="${cls}">${value}</b></div>`;
     $('#hud').innerHTML = `
-      <div class="brand"><span>HashForge</span></div>
-      <div class="stat"><span class="muted">Cash</span><b class="${s.cash < 0 ? 'bad' : ''}">${m(s.cash)}</b></div>
-      <div class="stat"><span class="muted">Profit / day</span><b class="${profit >= 0 ? 'good' : 'bad'}">${m(profit)}</b></div>
-      ${s.clients?.length ? `<div class="stat" title="Hosting income per day from ${s.clients.length} client(s)"><span class="muted">Hosting / day</span><b class="good">${m(hosting)}</b></div>` : ''}
-      <div class="stat"><span class="muted">Power</span><b>${kw(r.demandWatts)}</b></div>
-      <div class="stat"><span class="muted">Tariff</span><b>${m(s.tariffLocal / s.fx * r.location.tariffMult * E.effects(s).tariff, { precise: true })}/kWh</b></div>
-      <div class="stat"><span class="muted">Chips</span><b class="${r.deviceTemp > 85 ? 'bad' : r.deviceTemp > 75 ? 'warn' : ''}">${r.minerWatts ? Math.round(r.deviceTemp) : Math.round(r.roomTemp)} °C</b></div>
-      <div class="stat"><span class="muted">Grid</span><b class="${r.offline ? 'bad' : shedding ? 'warn' : 'good'}">${r.offline ? 'DOWN' : shedding ? `Stage ${s.grid.stage}` : 'OK'}</b></div>
-      <div class="stat"><span class="muted">${gameDate(s.day)}</span><b>Day ${Math.floor(s.day) + 1}</b></div>
-      ${s.prestige.forks ? `<div class="stat"><span class="muted">Era</span><b class="warn">Fork ${s.prestige.forks}</b></div>` : ''}
-      <div class="speed">${SPEEDS.map((sp, i) => `<button class="${i === this.speedIndex ? 'on' : ''}" data-action="speed" data-arg="${i}" title="${sp ? `${sp} game hours per second` : 'Pause'}">${sp ? `${sp}×` : '❚❚'}</button>`).join('')}</div>`;
+      <div class="brand"><span class="logo">⬢</span><span class="word">HashForge</span></div>
+      <button class="lvl" data-action="nav" data-id="career" title="${esc(C.rankOf(c.level))}: ${Math.round(c.xp)} / ${C.xpToNext(c.level)} XP">
+        <span class="ring" style="--p:${(xpFrac * 100).toFixed(1)}"><b>${c.level}</b></span>
+        <span class="lvl-text"><span class="rank">${esc(C.rankOf(c.level))}</span><span class="xpbar"><i style="width:${(xpFrac * 100).toFixed(1)}%"></i></span></span>
+      </button>
+      <div class="stat cash"><span>Cash</span><b id="hud-cash" class="${s.cash < 0 ? 'bad' : ''}">${m(this.cashShown ?? s.cash)}</b></div>
+      ${tile('Profit / day', `${profit >= 0 ? '▲' : '▼'} ${m(Math.abs(profit))}`, profit >= 0 ? 'good' : 'bad')}
+      ${s.clients?.length ? tile('Hosting / day', m(hosting), 'good', `Hosting income per day from ${s.clients.length} client(s)`) : ''}
+      ${tile('Power', kw(r.demandWatts))}
+      ${tile('Chips', `${r.minerWatts ? Math.round(r.deviceTemp) : Math.round(r.roomTemp)} °C`, r.deviceTemp > 85 ? 'bad' : r.deviceTemp > 75 ? 'warn' : '')}
+      ${tile('Grid', r.offline ? 'DOWN' : shedding ? `Stage ${s.grid.stage}` : 'OK', r.offline ? 'bad' : shedding ? 'warn' : 'good')}
+      ${tile(gameDate(s.day), `Day ${Math.floor(s.day) + 1}`)}
+      ${s.prestige.forks ? tile('Era', `Fork ${s.prestige.forks}`, 'warn') : ''}
+      ${buffs.length ? `<div class="buffs">${buffs.map((b) => `<span class="buff" title="${esc(b.label)}">${b.kind === 'hash' ? '⚡' : b.kind === 'tariff' ? '🔌' : '🏷️'} ${esc(b.label)} · ${Math.ceil(b.untilDay - s.day)}d</span>`).join('')}</div>` : ''}
+      <div class="hud-right">
+        <button class="icon-btn sound" data-action="sound" title="Sound ${soundOn() ? 'on' : 'off'}">${soundOn() ? '🔊' : '🔇'}</button>
+        <div class="speed">${SPEEDS.map((sp, i) => `<button class="${i === this.speedIndex ? 'on' : ''}" data-action="speed" data-arg="${i}" title="${sp ? `${sp} game hours per second (key ${i})` : 'Pause (space)'}">${sp ? `${sp}×` : '❚❚'}</button>`).join('')}</div>
+      </div>`;
     document.querySelectorAll('.nav-btn').forEach((b) => b.classList.toggle('on', b.dataset.id === this.view));
+    const ready = c.jobs.filter((j) => j.done).length;
+    document.querySelectorAll('.nav-btn[data-id="career"]').forEach((b) => b.classList.toggle('ping', C.dailyAvailable(s, this.today()) || ready > 0));
   }
 
   renderMain(force) {
@@ -354,7 +419,7 @@ export class App {
       floor: () => this.viewFloor(), shop: () => this.viewShop(), used: () => this.viewUsed(), junk: () => this.viewJunk(),
       bench: () => this.viewBench(), inventory: () => this.viewInventory(), power: () => this.viewPower(),
       servers: () => this.viewServers(), clients: () => this.viewClients(),
-      market: () => this.viewMarket(), fork: () => this.viewFork(), settings: () => this.viewSettings(),
+      market: () => this.viewMarket(), fork: () => this.viewFork(), settings: () => this.viewSettings(), career: () => this.viewCareer(),
     }[this.view]();
     if (!force && html === this.lastMainHtml) return;   // nothing changed: keep the DOM (and any click in progress)
     this.lastMainHtml = html;
@@ -362,7 +427,7 @@ export class App {
     $('#main').innerHTML = html;
     $('#main').scrollTop = scroll;
     if (this.view === 'floor') {
-      this.floor = new FloorPlan($('#floor'), { onSelect: (pick) => this.onFloorSelect(pick) });
+      this.floor = new FloorPlan($('#floor'), { onSelect: (pick) => this.onFloorSelect(pick), money: (v) => this.money(v, { precise: v < 10 }) });
       this.floor.selected = this.selection?.uid;
       this.renderFloorDetails();
     } else this.floor = null;
@@ -1029,24 +1094,20 @@ export class App {
 
   renderSide() {
     const s = this.state;
-    const tips = E.advise(s).slice(0, 6);
+    const tips = E.advise(s).slice(0, 4);
     const reg = E.region(s);
     const goal = E.currentGoal(s, this.room);
-    const away = this.awayReport;
     const sideHtml = `
-      ${away ? `<div class="card away"><div class="spread"><h3>Welcome back</h3><button class="icon-btn" data-action="dismiss-away" aria-label="Dismiss">✕</button></div>
-        <div class="small">${away.days.toFixed(1)} game days passed while you were away.</div>
-        <div class="kv" style="margin-top:6px"><span>Mined</span><span class="good">${this.money(away.mined)}</span><span>Cash change</span><span class="${away.cashChange >= 0 ? 'good' : 'bad'}">${away.cashChange >= 0 ? '+' : ''}${this.money(away.cashChange)}</span></div>
-        <div class="small muted" style="margin-top:6px">Time away runs at 1 game hour per real minute, up to a game week. Check the log for anything that broke.</div></div>` : ''}
-      <div class="goal-card"><div class="spread"><h3>🎯 ${goal.endless ? 'Milestone' : `Goal ${goal.index + 1} of ${goal.total}`}</h3><span class="small good">+${this.money(goal.reward)}</span></div>
+      <div class="goal-card"><div class="spread"><h3>🎯 ${goal.endless ? 'Milestone' : `Goal ${goal.index + 1} of ${goal.total}`}</h3><span class="reward">+${this.money(goal.reward)}</span></div>
         <div class="goal-title">${esc(this.fmt(goal.title))}</div>
-        <div class="bar" style="margin:6px 0"><i style="width:${Math.round(goal.value * 100)}%"></i></div>
+        <div class="bar glow" style="margin:8px 0 6px"><i style="width:${Math.round(goal.value * 100)}%"></i></div>
         <div class="small muted">${esc(this.fmt(goal.hint))}</div></div>
-      <div><h3 style="margin-bottom:8px">🤖 Advisor</h3>${tips.map((t) => `<div class="tip ${t.level}">${esc(this.fmt(t.text))}</div>`).join('<div style="height:6px"></div>')}</div>
-      ${reg.loadShedding ? `<div><h3 style="margin-bottom:6px">Load-shedding ${s.grid.stage ? `<span class="warn">Stage ${s.grid.stage}</span>` : '<span class="good">off</span>'}</h3>
+      ${this.contractsHtml()}
+      <section><h3 class="side-h">🤖 Advisor</h3>${tips.map((t) => `<div class="tip ${t.level}">${esc(this.fmt(t.text))}</div>`).join('')}</section>
+      ${reg.loadShedding ? `<section><h3 class="side-h">Load-shedding ${s.grid.stage ? `<span class="pill warn">Stage ${s.grid.stage}</span>` : '<span class="pill good">off</span>'}</h3>
         <div class="shed">${E.sheddingSchedule(s, 24).map((off, i) => `<i class="${off ? 'off' : ''} ${i === 0 ? 'now' : ''}"></i>`).join('')}</div>
-        <div class="small muted" style="margin-top:4px">Next 24 hours (red = no grid)</div></div>` : ''}
-      <div><h3 style="margin-bottom:8px">Log</h3><div class="log">${s.log.slice(0, 14).map((l) => `<div class="${l.type}"><span class="muted">D${Math.floor(l.day) + 1}</span> ${esc(this.fmt(l.text))}${l.count > 1 ? ` <span class="count">×${l.count}</span>` : ''}</div>`).join('')}</div></div>`;
+        <div class="small muted" style="margin-top:4px">Next 24 hours (red = no grid)</div></section>` : ''}
+      <section><h3 class="side-h">Log</h3><div class="log">${s.log.slice(0, 12).map((l) => `<div class="${l.type}"><span class="muted">D${Math.floor(l.day) + 1}</span> ${esc(this.fmt(l.text))}${l.count > 1 ? ` <span class="count">×${l.count}</span>` : ''}</div>`).join('')}</div></section>`;
     if (sideHtml !== this.lastSideHtml) { this.lastSideHtml = sideHtml; $('#side').innerHTML = sideHtml; }
     if (s.gameOver && !this.shownGameOver) {
       this.shownGameOver = true;
@@ -1054,14 +1115,146 @@ export class App {
     }
   }
 
-  // ---------------------------------------------------------------- 3D overlays
+  // ---------------------------------------------------------------- career
 
-  async ensureViewer() {
-    if (!this.viewer) {
-      const { ProductViewer } = await import('../render/viewer.js');
-      this.viewer = new ProductViewer($('#stage3d'));
-    }
-    return this.viewer;
+  today() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  /** Toasts, sounds, confetti and banners for whatever the career tick reported. */
+  celebrate(out) {
+    if (!out) return;
+    const m = this.money;
+    (out.achievements || []).slice(0, 3).forEach((a, i) => setTimeout(() => {
+      this.toast(`${a.icon} Badge unlocked: ${a.name}${a.reward ? ` (+${m(a.reward)})` : ''}`, 'gold');
+      sfx.badge();
+      confetti({ x: 0.5, y: 0.2, count: 70, spread: 0.8 });
+    }, i * 700));
+    if ((out.achievements || []).length > 3) this.toast(`…and ${out.achievements.length - 3} more badges. See Career.`, 'gold');
+    (out.levelUps || []).slice(-1).forEach((u) => {
+      banner(`LEVEL ${u.level}`, u.rank ? `New rank: ${u.rank}` : `Level bonus +${m(u.reward)}`);
+      sfx.level();
+      confetti({ count: 200, spread: 1.2 });
+    });
+    (out.jobs || []).forEach((j) => { this.toast(`📋 Contract complete: ${j.title}. Claim it!`, 'good'); sfx.alert(); });
+    if (out.event) { sfx.alert(); }
+  }
+
+  contractsHtml() {
+    const c = C.ensure(this.state); const m = this.money; const s = this.state;
+    const day = Math.floor(s.day);
+    const jobs = [...c.jobs].sort((a, b) => b.done - a.done);
+    return `<section class="contracts"><div class="spread"><h3 class="side-h">📋 Contracts</h3><span class="small muted">${c.jobsDone} done</span></div>
+      ${jobs.map((j) => {
+        const p = j.done ? 1 : C.jobProgress(s, j, this.room);
+        const left = j.endsDay - day;
+        return `<div class="job ${j.done ? 'done' : ''}">
+          <div class="spread"><span class="job-title">${esc(this.fmt(j.title))}</span>
+            ${j.done ? `<button class="btn claim" data-action="claim-job" data-id="${j.id}">Claim</button>` : `<button class="icon-btn x" data-action="drop-job" data-id="${j.id}" title="Skip this contract" aria-label="Skip">✕</button>`}</div>
+          <div class="bar"><i style="width:${Math.round(p * 100)}%"></i></div>
+          <div class="job-meta"><span class="good">+${m(j.reward)}</span><span class="xp">+${j.xp} XP</span>${j.done ? '<span class="good">Ready</span>' : `<span class="${left <= 1 ? 'warn' : 'muted'}">${left <= 0 ? 'last day' : `${left}d left`}</span>`}</div>
+        </div>`;
+      }).join('') || '<div class="small muted">New contracts arrive soon.</div>'}</section>`;
+  }
+
+  renderEvent() {
+    const v = C.eventView(this.state);
+    let el = document.getElementById('event');
+    if (!el) { el = document.createElement('div'); el.id = 'event'; document.body.appendChild(el); }
+    const html = v && !this.startOpen ? `<div class="event-card">
+        <div class="event-tag">Event</div>
+        <div class="event-head"><span class="event-ico">${v.icon}</span><h3>${esc(this.fmt(v.title))}</h3></div>
+        <p>${esc(this.fmt(v.text))}</p>
+        <div class="event-choices">${v.choices.map((c, i) => `<button class="btn ${i === 0 ? 'primary' : ''}" data-action="event-choice" data-arg="${c.i}" ${c.affordable ? '' : 'disabled title="Not enough cash"'}>${esc(this.fmt(c.label))}</button>`).join('')}</div>
+      </div>` : '';
+    if (html !== this.lastEventHtml) { this.lastEventHtml = html; el.innerHTML = html; }
+  }
+
+  /** Title screen: welcome back, what happened while away, and the daily bonus. */
+  showStart() {
+    const s = this.state; const c = C.ensure(s); const m = this.money;
+    const fresh = !s.rigs.length && !s.racks.length && !(s.servers || []).length && s.day < 1;
+    const daily = C.dailyAvailable(s, this.today()) ? C.dailyPreview(s, this.today()) : null;
+    const away = this.awayReport;
+    this.speedBefore = this.speedIndex || 1;
+    this.speedIndex = 0;
+    this.startOpen = true;
+    const el = document.createElement('div');
+    el.id = 'start';
+    el.innerHTML = `<div class="start-card">
+      <div class="start-logo"><span class="logo">⬢</span> HashForge</div>
+      <div class="start-sub">${fresh ? 'Build a crypto-mining and hosting empire from a bedroom corner.' : `Level ${c.level} · ${esc(C.rankOf(c.level))} · Day ${Math.floor(s.day) + 1}`}</div>
+      ${fresh ? `<ul class="start-list"><li>⛏️ Build GPU rigs and racks of ASIC miners</li><li>🖥️ Build servers and host paying clients</li><li>⚡ Survive load-shedding with UPS, solar and batteries</li><li>🏆 Level up, finish contracts and collect badges</li></ul>` : `
+      <div class="start-stats"><div><span>Cash</span><b>${m(s.cash)}</b></div><div><span>Net worth</span><b>${m(E.netWorth(s))}</b></div><div><span>Badges</span><b>${Object.keys(c.achievements).length} / ${C.ACHIEVEMENTS.length}</b></div></div>`}
+      ${away ? `<div class="start-away">While you were away (${away.days.toFixed(1)} game days): mined <b class="good">${m(away.mined)}</b>, cash <b class="${away.cashChange >= 0 ? 'good' : 'bad'}">${away.cashChange >= 0 ? '+' : ''}${m(away.cashChange)}</b></div>` : ''}
+      ${daily ? `<div class="daily">
+        <div class="spread"><b>🔥 Daily bonus</b><span class="muted small">Day ${daily.count} streak</span></div>
+        <div class="flames">${Array.from({ length: 7 }, (_, i) => `<i class="${i < Math.min(daily.count, 7) ? 'lit' : ''}">${i + 1}</i>`).join('')}</div>
+        <div class="small muted">Come back every day: the bonus grows for 14 days.</div>
+        <button class="btn primary big" data-action="daily-claim">Claim ${m(daily.cash)} + ${daily.xp} XP</button></div>` : ''}
+      <button class="btn ${daily ? '' : 'primary'} big" data-action="start-play">${fresh ? 'Start mining' : daily ? 'Skip for now' : 'Continue'}</button>
+      <div class="start-keys muted small">Space pauses · keys 1 to 4 set the speed</div>
+    </div>`;
+    document.body.appendChild(el);
+  }
+
+  closeStart() {
+    document.getElementById('start')?.remove();
+    if (!this.startOpen) return;
+    this.startOpen = false;
+    this.awayReport = null;
+    this.speedIndex = this.speedBefore || 1;
+    this.render(true);
+  }
+
+  viewCareer() {
+    const s = this.state; const c = C.ensure(s); const m = this.money;
+    const need = C.xpToNext(c.level);
+    const next = C.nextRank(c.level);
+    const got = Object.keys(c.achievements).length;
+    const daily = C.dailyAvailable(s, this.today()) ? C.dailyPreview(s, this.today()) : null;
+    const buffs = (s.buffs || []).filter((b) => b.untilDay > s.day);
+    const st = s.stats;
+    return `
+      <div class="page-head"><div><h1>Career</h1><div class="muted">Level up from earnings, contracts, events and badges. Every level pays a bonus.</div></div></div>
+      <div class="career-top">
+        <div class="card career-hero">
+          <div class="big-ring" style="--p:${(c.xp / need * 100).toFixed(1)}"><div><b>${c.level}</b><span>level</span></div></div>
+          <div class="hero-text">
+            <div class="rank-big">${esc(C.rankOf(c.level))}</div>
+            <div class="muted">${Math.round(c.xp).toLocaleString()} / ${need.toLocaleString()} XP to level ${c.level + 1} (bonus ${m(C.levelReward(c.level + 1))})</div>
+            <div class="bar glow" style="margin:10px 0"><i style="width:${(c.xp / need * 100).toFixed(1)}%"></i></div>
+            <div class="small muted">${next ? `Next rank: <b>${esc(next[1])}</b> at level ${next[0]}` : 'Top rank reached. Legend.'} · Contract slots: ${C.jobSlots(c.level)}</div>
+            <div class="rank-ladder">${C.RANKS.map(([l, n]) => `<span class="${c.level >= l ? 'on' : ''}" title="Level ${l}">${esc(n)}</span>`).join('')}</div>
+          </div>
+        </div>
+        <div class="card streak-card">
+          <h3>🔥 Daily streak</h3>
+          <div class="flames">${Array.from({ length: 7 }, (_, i) => `<i class="${i < Math.min(c.streak.count, 7) ? 'lit' : ''}">${i + 1}</i>`).join('')}</div>
+          <div class="small muted">Current ${c.streak.count} · best ${c.streak.best || 0}</div>
+          ${daily ? `<button class="btn primary" style="margin-top:10px;width:100%" data-action="daily-claim">Claim ${m(daily.cash)} + ${daily.xp} XP</button>` : '<div class="small good" style="margin-top:10px">Claimed today. Back tomorrow!</div>'}
+          ${buffs.length ? `<h3 style="margin-top:14px">Active boosts</h3>${buffs.map((b) => `<div class="buff-row"><span>${esc(b.label)}</span><span class="muted">${Math.ceil(b.untilDay - s.day)} days</span></div>`).join('')}` : ''}
+        </div>
+      </div>
+      <div class="card career-jobs" style="margin-top:14px">${this.contractsHtml()}</div>
+      <div class="spread" style="margin:20px 0 10px"><h2>Badges</h2><span class="muted">${got} / ${C.ACHIEVEMENTS.length} unlocked</span></div>
+      <div class="badges">${C.ACHIEVEMENTS.map((a) => {
+        const on = c.achievements[a.id] !== undefined;
+        return `<div class="badge ${on ? 'on' : ''}"><div class="badge-ico">${a.icon}</div><div><div class="badge-name">${esc(a.name)}</div><div class="small muted">${esc(this.fmt(a.desc))}</div>
+          <div class="small ${on ? 'good' : 'muted'}">${on ? `Unlocked day ${Math.floor(c.achievements[a.id]) + 1}` : a.reward ? `Reward ${m(a.reward)}` : ''}</div></div></div>`;
+      }).join('')}</div>
+      <h2 style="margin:20px 0 10px">Lifetime</h2>
+      <div class="grid">
+        <div class="card stat-card"><span>Mined</span><b>${m(st.minedUsd)}</b></div>
+        <div class="card stat-card"><span>Hosting income</span><b>${m(st.hostingUsd || 0)}</b></div>
+        <div class="card stat-card"><span>Power bills paid</span><b>${m(st.powerPaid)}</b></div>
+        <div class="card stat-card"><span>Best day</span><b>${m(st.bestDay)}</b></div>
+        <div class="card stat-card"><span>Contracts done</span><b>${c.jobsDone}</b></div>
+        <div class="card stat-card"><span>Events handled</span><b>${c.eventsDone}</b></div>
+        <div class="card stat-card"><span>Cards built</span><b>${st.crafted}</b></div>
+        <div class="card stat-card"><span>Hours mining</span><b>${(st.onlineHours || 0).toLocaleString()}</b></div>
+      </div>`;
   }
 
   openOverlay(title) {
