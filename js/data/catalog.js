@@ -6,9 +6,9 @@ export const ALGOS = {
   sha256:     { name: 'SHA-256',    coin: 'BTC', coinName: 'Bitcoin',     unit: 'TH/s', basePrice: 95000, revenuePerUnit: 0.060, color: '#f7931a', asicOnly: true },
   scrypt:     { name: 'Scrypt',     coin: 'LTC', coinName: 'Litecoin',    unit: 'GH/s', basePrice: 100,   revenuePerUnit: 1.40,  color: '#9fb4d8', asicOnly: true },
   kheavyhash: { name: 'kHeavyHash', coin: 'KAS', coinName: 'Kaspa',       unit: 'TH/s', basePrice: 0.10,  revenuePerUnit: 0.35,  color: '#49eacb', asicOnly: true },
-  kawpow:     { name: 'KawPow',     coin: 'RVN', coinName: 'Ravencoin',   unit: 'MH/s', basePrice: 0.02,  revenuePerUnit: 0.025, color: '#5b8cff' },
-  etchash:    { name: 'Etchash',    coin: 'ETC', coinName: 'Ethereum Classic', unit: 'MH/s', basePrice: 25, revenuePerUnit: 0.011, color: '#3ab83a' },
-  autolykos:  { name: 'Autolykos2', coin: 'ERG', coinName: 'Ergo',        unit: 'MH/s', basePrice: 1.5,   revenuePerUnit: 0.0045, color: '#ff5e18' },
+  kawpow:     { name: 'KawPow',     coin: 'RVN', coinName: 'Ravencoin',   unit: 'MH/s', basePrice: 0.02,  revenuePerUnit: 0.035, color: '#5b8cff' },
+  etchash:    { name: 'Etchash',    coin: 'ETC', coinName: 'Ethereum Classic', unit: 'MH/s', basePrice: 25, revenuePerUnit: 0.015, color: '#3ab83a' },
+  autolykos:  { name: 'Autolykos2', coin: 'ERG', coinName: 'Ergo',        unit: 'MH/s', basePrice: 1.5,   revenuePerUnit: 0.0063, color: '#ff5e18' },
 };
 export const GPU_ALGOS = ['kawpow', 'etchash', 'autolykos'];
 
@@ -119,18 +119,56 @@ export const COOLING = [
   { id: 'immersion', name: 'Immersion Cooling Tank', cooling: 30000, power: 1500, price: 9000, kind: 'cooling', style: 'tank' },
 ];
 
-export const BACKUP = [
-  { id: 'ups', name: 'UPS Battery Bank (2 h)', capacityKwh: 10, price: 1500, kind: 'backup', perKwh: 0 },
-  { id: 'generator', name: 'Diesel Generator (20 kW)', capacityKw: 20, price: 3500, kind: 'backup', perKwh: 0.38 },
+// Racks hold ASIC miners. Each rack's PDU (power strip) has a limit: overload it and the rack trips.
+export const RACKS = [
+  { id: 'shelf', name: 'Steel Wire Shelf', units: 2, pduKw: 4, price: 90, kind: 'rack', style: 'shelf' },
+  { id: 'openrack', name: 'Open-Frame Mining Rack', units: 4, pduKw: 15, price: 380, kind: 'rack', style: 'open' },
+  { id: 'rack42u', name: '42U Server Rack + 3-Phase PDU', units: 8, pduKw: 30, price: 1600, kind: 'rack', style: 'cabinet' },
 ];
 
-// Locations: power price, circuit capacity and ambient temperature define the challenge.
+// Off-grid power. Nothing from solar or batteries reaches the miners without an inverter,
+// and an inverter can only deliver its rated kW: ask for more and it trips.
+export const INVERTERS = [
+  { id: 'inv3', name: '3 kW Hybrid Inverter', kw: 3, efficiency: 0.94, price: 650, kind: 'inverter' },
+  { id: 'inv8', name: '8 kW Hybrid Inverter', kw: 8, efficiency: 0.95, price: 1500, kind: 'inverter' },
+  { id: 'inv16', name: '16 kW Hybrid Inverter', kw: 16, efficiency: 0.96, price: 3200, kind: 'inverter' },
+  { id: 'inv50', name: '50 kW Three-Phase Inverter', kw: 50, efficiency: 0.97, price: 9500, kind: 'inverter' },
+];
+// cycles: full charge cycles until the battery is worn to 70% capacity.
+export const BATTERIES = [
+  { id: 'lead5', name: '5 kWh Lead-Acid Bank', kwh: 5, maxKw: 2, efficiency: 0.8, cycles: 500, price: 900, kind: 'battery' },
+  { id: 'lfp5', name: '5 kWh LiFePO4 Battery', kwh: 5, maxKw: 5, efficiency: 0.92, cycles: 4000, price: 1500, kind: 'battery' },
+  { id: 'lfp15', name: '15 kWh LiFePO4 Stack', kwh: 15, maxKw: 10, efficiency: 0.93, cycles: 6000, price: 4000, kind: 'battery' },
+  { id: 'bess100', name: '100 kWh Containerised Battery', kwh: 100, maxKw: 50, efficiency: 0.94, cycles: 6000, price: 24000, kind: 'battery' },
+];
+// kwp: peak output in full sun. Real output follows the sun, the season and the weather.
+export const SOLAR = [
+  { id: 'panel4', name: '4 x 550 W Solar Panels', kwp: 2.2, price: 900, kind: 'solar' },
+  { id: 'array10', name: '10 kWp Rooftop Array', kwp: 10, price: 3800, kind: 'solar' },
+  { id: 'array50', name: '50 kWp Ground-Mount Array', kwp: 50, price: 17000, kind: 'solar' },
+];
+export const GENERATORS = [
+  { id: 'generator', name: '20 kW Diesel Generator', kw: 20, litresPerKwh: 0.3, price: 3500, kind: 'generator' },
+];
+
+// Regions set the currency, the home electricity tariff (in local currency per kWh) and the grid's habits.
+// Tariffs are typical residential figures and can be edited in Settings - every utility differs.
+// fx: fallback USD -> local rate used until a live rate is fetched.
+export const REGIONS = [
+  { id: 'za', name: 'South Africa', currency: 'ZAR', symbol: 'R', locale: 'en-ZA', fx: 18.2, tariff: 3.80, loadShedding: true, outageRate: 0.004 },
+  { id: 'us', name: 'United States', currency: 'USD', symbol: '$', locale: 'en-US', fx: 1, tariff: 0.17, loadShedding: false, outageRate: 0.01 },
+  { id: 'gb', name: 'United Kingdom', currency: 'GBP', symbol: '£', locale: 'en-GB', fx: 0.79, tariff: 0.25, loadShedding: false, outageRate: 0.006 },
+  { id: 'eu', name: 'Eurozone', currency: 'EUR', symbol: '€', locale: 'de-DE', fx: 0.92, tariff: 0.28, loadShedding: false, outageRate: 0.006 },
+  { id: 'au', name: 'Australia', currency: 'AUD', symbol: 'A$', locale: 'en-AU', fx: 1.52, tariff: 0.32, loadShedding: false, outageRate: 0.008 },
+];
+
+// Locations: space, circuit size and how much cheaper than home power they are (tariffMult).
 export const LOCATIONS = [
-  { id: 'bedroom', name: 'Bedroom Corner', rigSlots: 2, asicSlots: 1, coolingSlots: 2, circuitKw: 3.6, tariff: 0.16, ambient: 24, roomSize: 1, price: 0, w: 10, d: 8 },
-  { id: 'garage', name: 'Double Garage', rigSlots: 6, asicSlots: 4, coolingSlots: 3, circuitKw: 15, tariff: 0.13, ambient: 26, roomSize: 2.2, price: 6000, w: 16, d: 12 },
-  { id: 'warehouse', name: 'Industrial Warehouse', rigSlots: 16, asicSlots: 24, coolingSlots: 6, circuitKw: 120, tariff: 0.08, ambient: 22, roomSize: 6, price: 45000, w: 30, d: 20 },
-  { id: 'hydro', name: 'Hydro-Powered Mining Hall', rigSlots: 30, asicSlots: 80, coolingSlots: 10, circuitKw: 500, tariff: 0.04, ambient: 12, roomSize: 14, price: 250000, w: 44, d: 28 },
+  { id: 'bedroom', name: 'Bedroom Corner', rigSlots: 2, rackSlots: 1, coolingSlots: 2, roofKwp: 4.4, circuitKw: 3.6, tariffMult: 1.0, ambient: 24, roomSize: 1, price: 0, w: 10, d: 8 },
+  { id: 'garage', name: 'Double Garage', rigSlots: 6, rackSlots: 2, coolingSlots: 3, roofKwp: 12, circuitKw: 15, tariffMult: 0.9, ambient: 26, roomSize: 2.2, price: 6000, w: 16, d: 12 },
+  { id: 'warehouse', name: 'Industrial Warehouse', rigSlots: 16, rackSlots: 6, coolingSlots: 6, roofKwp: 100, circuitKw: 120, tariffMult: 0.6, ambient: 22, roomSize: 6, price: 45000, w: 30, d: 20 },
+  { id: 'hydro', name: 'Hydro-Powered Mining Hall', rigSlots: 30, rackSlots: 14, coolingSlots: 10, roofKwp: 200, circuitKw: 500, tariffMult: 0.25, ambient: 12, roomSize: 14, price: 250000, w: 44, d: 28 },
 ];
 
-export const ALL_ITEMS = [...GPUS, ...ASICS, ...PSUS, ...FRAMES, ...COOLING, ...BACKUP];
+export const ALL_ITEMS = [...GPUS, ...ASICS, ...PSUS, ...FRAMES, ...COOLING, ...RACKS, ...INVERTERS, ...BATTERIES, ...SOLAR, ...GENERATORS];
 export const byId = Object.fromEntries(ALL_ITEMS.map((i) => [i.id, i]));
