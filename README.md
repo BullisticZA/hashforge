@@ -63,7 +63,9 @@ See the [ROADMAP](ROADMAP.md) for what's next: PC and server building, networkin
 
 ## 🛠️ Run it locally
 
-No build step. Serve the folder with any static web server:
+No build step. On Windows, double-click **`Play HashForge.bat`**: it starts a tiny local server with PowerShell and opens the game in your browser. Opening `index.html` directly will show a blank page, because browsers block the game's scripts when a page is opened from disk.
+
+Or serve the folder with any static web server:
 
 ```bash
 git clone https://github.com/BullisticZA/hashforge.git
