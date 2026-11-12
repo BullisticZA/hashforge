@@ -201,5 +201,196 @@ export const FACILITY = [
   { id: 'filters', name: 'Intake Dust Filters', desc: 'Pleated filters on the intakes: dust builds up 60% slower.', price: 150 },
 ];
 
+
+// ------------------------------------------------------------------ expansion: the rest of the line-ups
+// gpu(id, name, vendor, gen, price, vram, mem, tdp, power, kawpow, etchash, autolykos, length, fans, year, extra)
+const gpuX = (...a) => Object.assign(gpu(...a.slice(0, 15)), a[15] || {});
+GPUS.push(
+  // NVIDIA current and recent
+  gpuX('rtx5060ti', 'GeForce RTX 5060 Ti 16GB', 'nvidia', 'RTX 50', 420, 16, 'GDDR7', 180, 140, 30, 60, 160, 240, 2, 2025),
+  gpuX('rtx5060', 'GeForce RTX 5060', 'nvidia', 'RTX 50', 300, 8, 'GDDR7', 145, 115, 26, 58, 140, 220, 2, 2025),
+  gpuX('rtx4080s', 'GeForce RTX 4080 Super', 'nvidia', 'RTX 40', 980, 16, 'GDDR6X', 320, 245, 52, 112, 300, 310, 3, 2024),
+  gpuX('rtx4070tis', 'GeForce RTX 4070 Ti Super', 'nvidia', 'RTX 40', 780, 16, 'GDDR6X', 285, 220, 44, 95, 260, 300, 3, 2024),
+  gpuX('rtx4070s', 'GeForce RTX 4070 Super', 'nvidia', 'RTX 40', 580, 12, 'GDDR6X', 220, 160, 36, 70, 210, 267, 2, 2024),
+  gpuX('rtx3090ti', 'GeForce RTX 3090 Ti', 'nvidia', 'RTX 30', 850, 24, 'GDDR6X', 450, 330, 62, 125, 280, 336, 3, 2022),
+  gpuX('rtx3070ti', 'GeForce RTX 3070 Ti', 'nvidia', 'RTX 30', 330, 8, 'GDDR6X', 290, 210, 34, 80, 180, 267, 2, 2021),
+  gpuX('rtx3050', 'GeForce RTX 3050 8GB', 'nvidia', 'RTX 30', 170, 8, 'GDDR6', 130, 90, 15, 30, 75, 200, 2, 2022),
+  gpuX('rtx2080s', 'GeForce RTX 2080 Super', 'nvidia', 'RTX 20', 220, 8, 'GDDR6', 250, 180, 28, 42, 110, 267, 2, 2019),
+  gpuX('rtx2080', 'GeForce RTX 2080', 'nvidia', 'RTX 20', 200, 8, 'GDDR6', 215, 170, 27, 40, 105, 267, 2, 2018),
+  gpuX('rtx2070', 'GeForce RTX 2070', 'nvidia', 'RTX 20', 170, 8, 'GDDR6', 175, 135, 21, 38, 95, 229, 2, 2018),
+  gpuX('rtx2060', 'GeForce RTX 2060 6GB', 'nvidia', 'RTX 20', 130, 6, 'GDDR6', 160, 115, 17, 30, 80, 229, 2, 2019),
+  gpuX('gtx1660ti', 'GeForce GTX 1660 Ti', 'nvidia', 'GTX 16', 125, 6, 'GDDR6', 120, 80, 14, 31, 72, 229, 2, 2019),
+  gpuX('gtx1660', 'GeForce GTX 1660', 'nvidia', 'GTX 16', 100, 6, 'GDDR5', 120, 85, 12, 26, 60, 229, 2, 2019),
+  gpuX('gtx1650s', 'GeForce GTX 1650 Super', 'nvidia', 'GTX 16', 90, 4, 'GDDR6', 100, 70, 10, 21, 52, 200, 1, 2019),
+  gpuX('gtx1080', 'GeForce GTX 1080', 'nvidia', 'GTX 10', 120, 8, 'GDDR5X', 180, 160, 21, 34, 85, 267, 2, 2016),
+  gpuX('gtx1070ti', 'GeForce GTX 1070 Ti', 'nvidia', 'GTX 10', 100, 8, 'GDDR5', 180, 140, 15, 31, 75, 267, 2, 2017),
+  gpuX('gtx1060', 'GeForce GTX 1060 6GB', 'nvidia', 'GTX 10', 60, 6, 'GDDR5', 120, 100, 10, 22, 50, 229, 2, 2016),
+  gpuX('gtx1050ti', 'GeForce GTX 1050 Ti', 'nvidia', 'GTX 10', 45, 4, 'GDDR5', 75, 65, 6, 13, 30, 190, 1, 2016),
+  gpuX('titanrtx', 'TITAN RTX', 'nvidia', 'RTX 20', 600, 24, 'GDDR6', 280, 230, 34, 60, 150, 267, 2, 2018),
+  gpuX('titanv', 'TITAN V', 'nvidia', 'Volta', 700, 12, 'HBM2', 250, 200, 38, 80, 160, 267, 1, 2017, { blower: true }),
+  // NVIDIA mining cards: no display outputs
+  gpuX('cmp30hx', 'CMP 30HX', 'nvidia', 'CMP', 90, 6, 'GDDR6', 125, 110, 15, 26, 60, 229, 2, 2021, { headless: true }),
+  gpuX('cmp40hx', 'CMP 40HX', 'nvidia', 'CMP', 150, 8, 'GDDR6', 185, 165, 20, 36, 85, 229, 2, 2021, { headless: true }),
+  gpuX('cmp50hx', 'CMP 50HX', 'nvidia', 'CMP', 200, 10, 'GDDR6', 250, 220, 26, 45, 110, 267, 2, 2021, { headless: true }),
+  gpuX('cmp90hx', 'CMP 90HX', 'nvidia', 'CMP', 300, 10, 'GDDR6X', 320, 250, 40, 86, 200, 285, 2, 2021, { headless: true }),
+  gpuX('cmp170hx', 'CMP 170HX', 'nvidia', 'CMP', 900, 8, 'HBM2e', 250, 240, 46, 164, 180, 267, 0, 2021, { headless: true, passive: true }),
+  gpuX('p106', 'P106-100 6GB', 'nvidia', 'Pascal mining', 40, 6, 'GDDR5', 120, 90, 10, 21, 45, 229, 2, 2017, { headless: true }),
+  gpuX('p104', 'P104-100 8GB', 'nvidia', 'Pascal mining', 60, 8, 'GDDR5X', 180, 120, 15, 37, 75, 229, 2, 2018, { headless: true }),
+  // Workstation and data centre
+  gpuX('a4000', 'RTX A4000', 'nvidia', 'Ampere Pro', 550, 16, 'GDDR6', 140, 140, 26, 60, 150, 241, 1, 2021, { blower: true }),
+  gpuX('a5000', 'RTX A5000', 'nvidia', 'Ampere Pro', 1100, 24, 'GDDR6', 230, 230, 40, 98, 220, 267, 1, 2021, { blower: true }),
+  gpuX('a100', 'A100 40GB PCIe', 'nvidia', 'Data centre', 6000, 40, 'HBM2', 250, 250, 56, 170, 400, 267, 0, 2020, { headless: true, passive: true }),
+  // AMD
+  gpuX('rx9070xt', 'Radeon RX 9070 XT', 'amd', 'RX 9000', 650, 16, 'GDDR6', 304, 250, 40, 80, 230, 300, 3, 2025),
+  gpuX('rx9070', 'Radeon RX 9070', 'amd', 'RX 9000', 570, 16, 'GDDR6', 220, 200, 36, 75, 210, 280, 3, 2025),
+  gpuX('rx9060xt', 'Radeon RX 9060 XT 16GB', 'amd', 'RX 9000', 360, 16, 'GDDR6', 160, 140, 22, 42, 120, 240, 2, 2025),
+  gpuX('rx7900gre', 'Radeon RX 7900 GRE', 'amd', 'RX 7000', 560, 16, 'GDDR6', 260, 220, 40, 70, 230, 276, 3, 2023),
+  gpuX('rx7700xt', 'Radeon RX 7700 XT', 'amd', 'RX 7000', 400, 12, 'GDDR6', 245, 180, 27, 52, 160, 267, 2, 2023),
+  gpuX('rx7600', 'Radeon RX 7600', 'amd', 'RX 7000', 260, 8, 'GDDR6', 165, 130, 18, 30, 95, 204, 2, 2023),
+  gpuX('rx6950xt', 'Radeon RX 6950 XT', 'amd', 'RX 6000', 470, 16, 'GDDR6', 335, 170, 38, 64, 210, 267, 3, 2022),
+  gpuX('rx6800', 'Radeon RX 6800', 'amd', 'RX 6000', 340, 16, 'GDDR6', 250, 140, 34, 62, 190, 267, 2, 2020),
+  gpuX('rx6750xt', 'Radeon RX 6750 XT', 'amd', 'RX 6000', 280, 12, 'GDDR6', 250, 115, 25, 47, 145, 267, 2, 2022),
+  gpuX('rx6650xt', 'Radeon RX 6650 XT', 'amd', 'RX 6000', 210, 8, 'GDDR6', 180, 75, 17, 32, 96, 240, 2, 2022),
+  gpuX('rx5700', 'Radeon RX 5700', 'amd', 'RX 5000', 120, 8, 'GDDR6', 180, 120, 25, 52, 120, 267, 2, 2019),
+  gpuX('rx5600xt', 'Radeon RX 5600 XT', 'amd', 'RX 5000', 100, 6, 'GDDR6', 150, 110, 20, 40, 95, 240, 2, 2020),
+  gpuX('rx5500xt', 'Radeon RX 5500 XT 8GB', 'amd', 'RX 5000', 70, 8, 'GDDR6', 130, 110, 12, 27, 55, 220, 2, 2019),
+  gpuX('radeon7', 'Radeon VII', 'amd', 'Vega', 250, 16, 'HBM2', 300, 200, 30, 90, 210, 268, 3, 2019),
+  gpuX('vega64', 'Radeon RX Vega 64', 'amd', 'Vega', 120, 8, 'HBM2', 295, 180, 22, 44, 130, 267, 1, 2017, { blower: true }),
+  gpuX('vega56', 'Radeon RX Vega 56', 'amd', 'Vega', 100, 8, 'HBM2', 210, 160, 20, 40, 120, 267, 1, 2017, { blower: true }),
+  gpuX('rx590', 'Radeon RX 590', 'amd', 'RX 500', 55, 8, 'GDDR5', 225, 130, 14, 30, 62, 241, 2, 2018),
+  gpuX('rx480', 'Radeon RX 480 8GB', 'amd', 'RX 400', 45, 8, 'GDDR5', 150, 120, 12, 29, 56, 241, 2, 2016),
+  gpuX('rx470', 'Radeon RX 470 8GB', 'amd', 'RX 400', 40, 8, 'GDDR5', 120, 110, 11, 27, 52, 241, 2, 2016),
+  gpuX('mi50', 'Instinct MI50 32GB', 'amd', 'Data centre', 350, 32, 'HBM2', 300, 200, 32, 90, 200, 267, 0, 2018, { headless: true, passive: true }),
+  gpuX('w6800', 'Radeon Pro W6800', 'amd', 'Pro', 900, 32, 'GDDR6', 250, 180, 34, 64, 190, 267, 1, 2021, { blower: true }),
+  // Intel
+  gpuX('arcb570', 'Arc B570', 'intel', 'Arc B', 220, 10, 'GDDR6', 150, 125, 19, 38, 108, 250, 2, 2025),
+  gpuX('arca750', 'Arc A750', 'intel', 'Arc A', 180, 8, 'GDDR6', 225, 150, 18, 36, 105, 272, 2, 2022),
+  gpuX('arca580', 'Arc A580', 'intel', 'Arc A', 150, 8, 'GDDR6', 185, 140, 15, 30, 90, 250, 2, 2023),
+  gpuX('arca380', 'Arc A380', 'intel', 'Arc A', 110, 6, 'GDDR6', 75, 60, 6, 13, 35, 190, 1, 2022),
+);
+
+ASICS.push(
+  // SHA-256: new generation, hydro and immersion
+  asic('s21plus', 'Antminer S21+', 'Bitmain', 'sha256', 216, 3564, 3800, 2025, 'box'),
+  asic('s21hyd', 'Antminer S21 Hydro', 'Bitmain', 'sha256', 335, 5360, 7000, 2024, 'hydro'),
+  asic('t21', 'Antminer T21', 'Bitmain', 'sha256', 190, 3610, 2800, 2024, 'box'),
+  asic('s19xphyd', 'Antminer S19 XP Hydro', 'Bitmain', 'sha256', 255, 5304, 4000, 2022, 'hydro'),
+  asic('s19jproplus', 'Antminer S19j Pro+', 'Bitmain', 'sha256', 122, 3355, 700, 2022, 'box'),
+  asic('s19pro', 'Antminer S19 Pro', 'Bitmain', 'sha256', 110, 3250, 550, 2020, 'box'),
+  asic('s19', 'Antminer S19', 'Bitmain', 'sha256', 95, 3250, 350, 2020, 'box'),
+  asic('t19', 'Antminer T19', 'Bitmain', 'sha256', 84, 3150, 250, 2020, 'box'),
+  asic('s17plus', 'Antminer S17+', 'Bitmain', 'sha256', 73, 2920, 180, 2019, 'box'),
+  asic('s17pro', 'Antminer S17 Pro', 'Bitmain', 'sha256', 53, 2094, 150, 2019, 'box'),
+  asic('s9se', 'Antminer S9 SE', 'Bitmain', 'sha256', 16, 1280, 90, 2018, 'box'),
+  asic('s9j', 'Antminer S9j', 'Bitmain', 'sha256', 14.5, 1350, 70, 2018, 'box'),
+  asic('m66s', 'Whatsminer M66S', 'MicroBT', 'sha256', 298, 5513, 6500, 2024, 'hydro'),
+  asic('m63s', 'Whatsminer M63S', 'MicroBT', 'sha256', 390, 7215, 9000, 2024, 'hydro'),
+  asic('m60', 'Whatsminer M60', 'MicroBT', 'sha256', 172, 3422, 2600, 2023, 'tall'),
+  asic('m56s', 'Whatsminer M56S', 'MicroBT', 'sha256', 212, 5550, 3500, 2023, 'hydro'),
+  asic('m50', 'Whatsminer M50', 'MicroBT', 'sha256', 114, 3306, 900, 2022, 'tall'),
+  asic('m31splus', 'Whatsminer M31S+', 'MicroBT', 'sha256', 82, 3280, 250, 2020, 'tall'),
+  asic('m21s', 'Whatsminer M21S', 'MicroBT', 'sha256', 56, 3360, 120, 2019, 'tall'),
+  asic('m20s', 'Whatsminer M20S', 'MicroBT', 'sha256', 68, 3360, 150, 2019, 'tall'),
+  asic('a1566', 'AvalonMiner A1566', 'Canaan', 'sha256', 185, 3420, 2800, 2024, 'tall'),
+  asic('a1366', 'AvalonMiner A1366', 'Canaan', 'sha256', 130, 3250, 1300, 2023, 'tall'),
+  asic('a1246', 'AvalonMiner A1246', 'Canaan', 'sha256', 90, 3420, 450, 2021, 'tall'),
+  asic('avmini3', 'Avalon Mini 3 (space heater)', 'Canaan', 'sha256', 37.5, 800, 900, 2024, 'heater'),
+  asic('avnano3', 'Avalon Nano 3 (desk heater)', 'Canaan', 'sha256', 4, 140, 180, 2024, 'heater'),
+  asic('bitaxe', 'Bitaxe Gamma (open-source)', 'Open hardware', 'sha256', 1.2, 18, 120, 2024, 'tiny'),
+  asic('nerdqaxe', 'NerdQaxe++ (open-source)', 'Open hardware', 'sha256', 4.8, 76, 350, 2025, 'tiny'),
+  // Scrypt
+  asic('l3pp', 'Antminer L3++', 'Bitmain', 'scrypt', 0.58, 942, 50, 2018, 'box'),
+  asic('dgmax', 'Goldshell DG Max', 'Goldshell', 'scrypt', 6.5, 3300, 3000, 2023, 'box'),
+  asic('minidoge3', 'Goldshell Mini-DOGE III', 'Goldshell', 'scrypt', 0.7, 400, 350, 2023, 'mini'),
+  asic('dg1plus', 'Elphapex DG1+', 'Elphapex', 'scrypt', 14, 3950, 6000, 2024, 'box'),
+  asic('volcd1', 'VolcMiner D1', 'VolcMiner', 'scrypt', 15.15, 3900, 7000, 2024, 'box'),
+  // kHeavyHash
+  asic('ks5l', 'IceRiver KS5L', 'IceRiver', 'kheavyhash', 12, 3400, 1500, 2024, 'box'),
+  asic('ks3l', 'IceRiver KS3L', 'IceRiver', 'kheavyhash', 5, 3200, 700, 2023, 'box'),
+  asic('ks2', 'IceRiver KS2', 'IceRiver', 'kheavyhash', 2, 1200, 500, 2023, 'mini'),
+  asic('ks1', 'IceRiver KS1', 'IceRiver', 'kheavyhash', 1, 600, 300, 2023, 'mini'),
+  asic('ks5', 'Antminer KS5', 'Bitmain', 'kheavyhash', 20, 3000, 3500, 2024, 'box'),
+  asic('kaboxpro', 'Goldshell KA Box Pro', 'Goldshell', 'kheavyhash', 1.6, 400, 400, 2023, 'mini'),
+  asic('eka1m', 'Goldshell E-KA1M', 'Goldshell', 'kheavyhash', 5.5, 1800, 1200, 2023, 'box'),
+  // Etchash
+  asic('x16p', 'Jasminer X16-P', 'Jasminer', 'etchash', 5800, 1900, 5500, 2024, 'quiet'),
+  asic('x4q', 'Jasminer X4-Q', 'Jasminer', 'etchash', 1040, 480, 1500, 2022, 'quiet'),
+  asic('e9pro', 'Antminer E9 Pro', 'Bitmain', 'etchash', 3680, 2200, 4000, 2022, 'box'),
+  asic('a11pro', 'Innosilicon A11 Pro', 'Innosilicon', 'etchash', 2000, 2500, 1500, 2021, 'box'),
+);
+
+PSUS.push(
+  { id: 'psu750b', name: '750 W 80 Plus Bronze', watts: 750, efficiency: 0.85, rating: 'Bronze', price: 70, kind: 'psu' },
+  { id: 'psu1200g', name: '1200 W 80 Plus Gold', watts: 1200, efficiency: 0.90, rating: 'Gold', price: 170, kind: 'psu' },
+  { id: 'psu1500p', name: '1500 W 80 Plus Platinum', watts: 1500, efficiency: 0.92, rating: 'Platinum', price: 300, kind: 'psu' },
+  { id: 'psu1600t', name: '1600 W 80 Plus Titanium', watts: 1600, efficiency: 0.94, rating: 'Titanium', price: 420, kind: 'psu' },
+  { id: 'mine1800', name: '1800 W Mining PSU (multi-rail)', watts: 1800, efficiency: 0.88, rating: 'Gold', price: 120, kind: 'psu', noisy: true },
+  { id: 'srv750g', name: '750 W Server PSU + breakout board', watts: 750, efficiency: 0.9, rating: 'Gold', price: 35, kind: 'psu', noisy: true },
+  { id: 'srv2400p', name: '2400 W Server PSU + breakout board', watts: 2400, efficiency: 0.93, rating: 'Platinum', price: 140, kind: 'psu', noisy: true },
+);
+
+FRAMES.push(
+  { id: 'frame8s', name: '8-GPU Stackable Aluminium Frame Kit', slots: 8, psuSlots: 2, basePower: 80, price: 390, kind: 'frame' },
+  { id: 'frame6c', name: '6-GPU Closed Server Case (fans, dust filter)', slots: 6, psuSlots: 1, basePower: 110, price: 420, kind: 'frame' },
+  { id: 'frame9c', name: '9-GPU Mining Server Case (Octominer-style)', slots: 9, psuSlots: 2, basePower: 130, price: 620, kind: 'frame' },
+  { id: 'frame19', name: '19-GPU Mega Rig Kit', slots: 19, psuSlots: 3, basePower: 150, price: 1100, kind: 'frame' },
+);
+
+COOLING.push(
+  { id: 'towerfan', name: 'Tower Fan', cooling: 1000, power: 45, price: 35, kind: 'cooling', style: 'fan' },
+  { id: 'inline', name: 'Inline Duct Fan (8-inch)', cooling: 2200, power: 110, price: 140, kind: 'cooling', style: 'fan' },
+  { id: 'roofex', name: 'Roof Extractor Fan', cooling: 9000, power: 600, price: 1800, kind: 'cooling', style: 'wall' },
+  { id: 'evaptower', name: 'Industrial Evaporative Tower', cooling: 20000, power: 900, price: 5200, kind: 'cooling', style: 'evap', humid: true },
+  { id: 'chiller', name: 'Water Chiller (for hydro miners)', cooling: 40000, power: 7000, price: 18000, kind: 'cooling', style: 'crac' },
+  { id: 'dryimmersion', name: 'Two-Phase Immersion Tank', cooling: 60000, power: 2500, price: 26000, kind: 'cooling', style: 'tank' },
+);
+
+RACKS.push(
+  { id: 'stackshelf', name: 'Stackable ASIC Shelving', units: 3, pduKw: 10, price: 220, kind: 'rack', style: 'shelf' },
+  { id: 'rack24u', name: '24U Rack + Smart PDU', units: 5, pduKw: 20, price: 900, kind: 'rack', style: 'cabinet' },
+  { id: 'rackhd', name: 'High-Density Mining Rack', units: 12, pduKw: 45, price: 2600, kind: 'rack', style: 'open' },
+  { id: 'container', name: '20 ft Mining Container Pod', units: 16, pduKw: 70, price: 22000, kind: 'rack', style: 'cabinet' },
+);
+
+INVERTERS.push(
+  { id: 'inv5', name: '5 kW Hybrid Inverter', kw: 5, efficiency: 0.95, price: 1000, kind: 'inverter' },
+  { id: 'inv12', name: '12 kW Hybrid Inverter', kw: 12, efficiency: 0.96, price: 2400, kind: 'inverter' },
+  { id: 'inv30', name: '30 kW Three-Phase Inverter', kw: 30, efficiency: 0.97, price: 6000, kind: 'inverter' },
+  { id: 'inv100', name: '100 kW Commercial Inverter', kw: 100, efficiency: 0.975, price: 17000, kind: 'inverter' },
+);
+BATTERIES.push(
+  { id: 'lead10', name: '10 kWh Lead-Acid Bank', kwh: 10, maxKw: 3, efficiency: 0.8, cycles: 600, price: 1700, kind: 'battery' },
+  { id: 'lfp10w', name: '10 kWh LiFePO4 Wall Battery', kwh: 10, maxKw: 7, efficiency: 0.93, cycles: 6000, price: 2800, kind: 'battery' },
+  { id: 'lfp30', name: '30 kWh LiFePO4 Rack Stack', kwh: 30, maxKw: 20, efficiency: 0.93, cycles: 6000, price: 7800, kind: 'battery' },
+  { id: 'bess250', name: '250 kWh Battery Container', kwh: 250, maxKw: 125, efficiency: 0.95, cycles: 7000, price: 55000, kind: 'battery' },
+);
+SOLAR.push(
+  { id: 'panel6', name: '6 x 550 W Solar Panels', kwp: 3.3, price: 1300, kind: 'solar' },
+  { id: 'array20', name: '20 kWp Rooftop Array', kwp: 20, price: 7200, kind: 'solar' },
+  { id: 'array100', name: '100 kWp Solar Field', kwp: 100, price: 32000, kind: 'solar' },
+  { id: 'array200', name: '200 kWp Solar Farm', kwp: 200, price: 60000, kind: 'solar' },
+);
+GENERATORS.push(
+  { id: 'gen5', name: '5.5 kW Petrol Generator', kw: 5.5, litresPerKwh: 0.45, price: 650, kind: 'generator' },
+  { id: 'gen60', name: '60 kW Diesel Genset', kw: 60, litresPerKwh: 0.28, price: 12000, kind: 'generator' },
+  { id: 'gen200', name: '200 kW Silent Diesel Genset', kw: 200, litresPerKwh: 0.26, price: 38000, kind: 'generator' },
+);
+RISERS.push(
+  { id: 'riser009splus', name: 'PCIe Riser 009S Plus (6-pin)', power: '6-pin', reliability: 0.8, fireRisk: 0, price: 8, kind: 'riser' },
+  { id: 'riser010s', name: 'PCIe Riser 010S (Molex)', power: 'Molex', reliability: 0.9, fireRisk: 0, price: 7, kind: 'riser' },
+  { id: 'riser012plus', name: 'PCIe Riser 012 Plus (LED, 6-pin)', power: '6-pin', reliability: 0.5, fireRisk: 0, price: 11, kind: 'riser' },
+  { id: 'riserribbon', name: 'Unpowered Ribbon Riser (x1)', power: 'None', reliability: 1.6, fireRisk: 2, price: 2, kind: 'riser' },
+);
+BOOT.push(
+  { id: 'usb32', name: '32 GB USB 3.1 Flash Drive', gb: 32, reliability: 1.6, price: 10, kind: 'boot', style: 'usb' },
+  { id: 'usb64', name: '64 GB USB Industrial Flash', gb: 64, reliability: 0.9, price: 24, kind: 'boot', style: 'usb' },
+  { id: 'ssd240', name: '240 GB SATA SSD', gb: 240, reliability: 0.6, price: 30, kind: 'boot', style: 'ssd' },
+  { id: 'nvme1t', name: '1 TB M.2 NVMe SSD', gb: 1000, reliability: 0.35, price: 65, kind: 'boot', style: 'nvme' },
+);
+MODS.push(
+  { id: 'paste', name: 'Thermal Paste Re-paste Kit', desc: 'Fresh paste on the GPU die: slower wear and +1% hashrate.', price: 8, kind: 'mod' },
+  { id: 'fans', name: 'GPU Fan Replacement Set', desc: 'New fans: restores 25% condition on a worn card.', price: 18, kind: 'mod', consumable: true },
+);
+
 export const ALL_ITEMS = [...GPUS, ...ASICS, ...PSUS, ...FRAMES, ...COOLING, ...RACKS, ...INVERTERS, ...BATTERIES, ...SOLAR, ...GENERATORS, ...RISERS, ...BOOT, ...MODS];
 export const byId = Object.fromEntries(ALL_ITEMS.map((i) => [i.id, i]));

@@ -31,7 +31,12 @@ Start in a bedroom corner with a little savings and a dream. Buy a rig kit, a po
 
 ## ✨ Features
 
-- **54 real GPUs and ASIC miners** (GeForce RTX 50 to GTX 10, Radeon RX 7000 to RX 500, Intel Arc, Antminer, Whatsminer and more) with approximate hash rates per algorithm
+- **240+ pieces of hardware**, each with its own 3D model and specs:
+  - **91 GPUs:** GeForce RTX 50 back to GTX 10, Radeon RX 9000 back to RX 400, Intel Arc, TITAN and workstation cards, headless CMP, P104 and P106 mining cards, and passive datacenter cards like the A100 and Instinct MI50
+  - **62 ASIC miners:** Bitmain, MicroBT, Canaan, IceRiver, Goldshell, Jasminer, Elphapex, VolcMiner and Innosilicon, including water-cooled hydro units, home-heater miners and tiny open-source boards
+  - **Power and site gear:** 14 PSUs, 8 rig frames, 7 racks (up to a 20 ft container pod), 15 cooling units (box fans to evaporative towers, chillers and immersion tanks), 8 inverters, 8 batteries, 7 solar arrays, 4 generators
+  - **Rig parts and mods:** 7 riser types, 7 boot drives, thermal pads, copper shims, fresh thermal paste and replacement fans
+- Shop **search and sort** by profit, payback time, price or release year
 - **Six algorithms:** SHA-256, Scrypt, kHeavyHash, KawPow, Etchash, Autolykos2. Rigs auto-switch to the most profitable
 - **Vendors, a used marketplace and a junkyard**, with quality grades from Scrap to **Golden Sample**
 - **GPU crafting:** match a core, memory, PCB and cooler; salvage cards back into parts

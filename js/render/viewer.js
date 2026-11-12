@@ -27,7 +27,7 @@ export class ProductViewer {
     this.controls.enableDamping = true;
     this.controls.autoRotate = true;
     this.controls.autoRotateSpeed = 1.6;
-    const key = new THREE.DirectionalLight('#ffffff', 2.4);
+    const key = new THREE.DirectionalLight('#ffffff', 1.8);
     key.position.set(4, 8, 6); key.castShadow = true;
     const rim = new THREE.DirectionalLight('#5ee7ff', 1.4);
     rim.position.set(-6, 3, -6);
@@ -41,7 +41,7 @@ export class ProductViewer {
     this.scene.add(floor);
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 0.28, 0.35, 0.97));
+    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 0.28, 0.35, 1.15));
     this.composer.addPass(new OutputPass());
     this.explodeTarget = 0; this.explodeNow = 0;
     this.clock = new THREE.Clock();
@@ -88,9 +88,7 @@ export class ProductViewer {
     this.model = pivot;
     this.inner = pivot.children[0];
     this.floor.position.y = -0.01;
-    const radius = Math.max(size.x, size.y, size.z);
-    this.camera.position.set(radius * 0.75, radius * 0.6, radius * 1.25);
-    this.controls.target.set(0, size.y / 2, 0);
+    this.frameCamera(size, 0.5);
     this.explodeTarget = 0; this.explodeNow = 0;
     this.canExplode = !!this.inner.userData.explode;
   }
@@ -108,10 +106,20 @@ export class ProductViewer {
     this.scene.add(this.pivot);
     this.inner = object;
     this.model = this.pivot;
-    const radius = Math.max(size.x, size.y, size.z);
-    this.camera.position.set(radius * 0.8, radius * 0.7, radius * 1.25);
-    this.controls.target.set(0, size.y * 0.45, 0);
+    this.frameCamera(size, 0.45);
     this.canExplode = false;
+  }
+
+  /** Back the camera off until the whole bounding sphere fits, whatever the panel's aspect ratio. */
+  frameCamera(size, targetY) {
+    const r = size.length() / 2;
+    const vfov = THREE.MathUtils.degToRad(this.camera.fov);
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * Math.max(0.5, this.camera.aspect));
+    const dist = (r / Math.sin(Math.min(vfov, hfov) / 2)) * 1.02;
+    const dir = new THREE.Vector3(0.5, 0.42, 0.85).normalize();
+    this.controls.target.set(0, size.y * targetY, 0);
+    this.camera.position.copy(dir.multiplyScalar(dist)).add(this.controls.target);
+    this.camera.far = Math.max(200, dist * 4); this.camera.updateProjectionMatrix();
   }
 
   setExploded(on) { this.explodeTarget = on ? 1 : 0; }

@@ -145,7 +145,9 @@ export class App {
     switch (action) {
       case 'nav': this.view = a.id; this.selection = null; this.render(true); break;
       case 'speed': this.speedIndex = +a.arg; this.render(true); break;
-      case 'shop-tab': this.shopTab = a.id; this.render(true); break;
+      case 'shop-tab': this.shopTab = a.id; this.shopFilter = ''; this.render(true); break;
+      case 'shop-filter': this.shopFilter = a.value; this.render(true); break;
+      case 'shop-sort': this.shopSort = a.value; this.render(true); break;
       case 'buy': {
         const item = byId[a.id];
         if (this.result(E.buy(s, a.id), `Bought ${item.name}`) && item.kind === 'frame') this.toast('Add a PSU and GPUs: open the rig from the Floor.', '');
@@ -383,17 +385,19 @@ export class App {
     const kits = this.state.inventory.filter((x) => byId[x.id].kind === 'mod');
     const mods = gpu.mods || {};
     const btns = [];
-    for (const id of ['pads', 'shim']) {
+    const labels = { pads: '🧊 Re-pad', shim: '🟧 Copper shims', paste: '🧴 Re-paste', fans: '🌀 New fans' };
+    for (const id of Object.keys(labels)) {
       if (mods[id]) continue;
+      if (id === 'fans' && (gpu.cond ?? 1) >= 0.99) continue;
       const kit = kits.find((k) => k.id === id);
-      if (kit && (!byId[id].needs || mods[byId[id].needs])) btns.push(`<button class="btn" data-action="mod" data-uid="${gpu.uid}" data-arg="${kit.uid}">${id === 'pads' ? '🧊 Re-pad' : '🟧 Copper shims'}</button>`);
+      if (kit && (!byId[id].needs || mods[byId[id].needs])) btns.push(`<button class="btn" data-action="mod" data-uid="${gpu.uid}" data-arg="${kit.uid}">${labels[id]}</button>`);
     }
     return btns.join('');
   }
 
   modTags(gpu) {
     const m = gpu.mods || {};
-    return `${m.pads ? '<span class="tag">Fresh pads</span>' : ''}${m.shim ? '<span class="tag">Copper shims</span>' : ''}${byId[gpu.id].mem === 'GDDR6X' && !m.pads ? '<span class="tag warn">Memory throttling</span>' : ''}`;
+    return `${m.pads ? '<span class="tag">Fresh pads</span>' : ''}${m.shim ? '<span class="tag">Copper shims</span>' : ''}${m.paste ? '<span class="tag">Re-pasted</span>' : ''}${byId[gpu.id].mem === 'GDDR6X' && !m.pads ? '<span class="tag warn">Memory throttling</span>' : ''}`;
   }
 
   ownedCard(o, actions = '') {
@@ -450,8 +454,18 @@ export class App {
         <div class="price">${l.price ? m(l.price * E.effects(s).price) : 'Free'}</div>
         ${i === cur ? '<span class="tag">You are here</span>' : i < cur ? '<span class="tag">Outgrown</span>' : `<button class="btn primary" data-action="move" data-id="${l.id}">Move here</button>`}</div>`).join('')}</div>`;
     }
-    const items = SHOP_TABS.find(([id]) => id === this.shopTab)[2];
-    return `<div class="page-head"><div><h1>Vendors</h1><div class="muted">Brand new, full warranty, full price. Click any item to inspect it in 3D.</div></div>${tabs}</div>
+    let items = SHOP_TABS.find(([id]) => id === this.shopTab)[2];
+    const f = (this.shopFilter || '').toLowerCase();
+    if (f) items = items.filter((it) => `${it.name} ${it.gen || ''} ${it.maker || ''} ${it.vendor || ''} ${it.algo ? ALGOS[it.algo].name : ''}`.toLowerCase().includes(f));
+    if (['gpu', 'asic'].includes(this.shopTab)) {
+      const sort = this.shopSort || 'profit';
+      const est = (it) => E.itemDailyEstimate(s, it)?.profit ?? 0;
+      items = [...items].sort((a, b) => sort === 'price' ? E.buyPrice(s, a) - E.buyPrice(s, b) : sort === 'newest' ? b.year - a.year
+        : sort === 'roi' ? (est(b) / E.buyPrice(s, b)) - (est(a) / E.buyPrice(s, a)) : est(b) - est(a));
+    }
+    const toolbar = `<div class="row" style="margin-bottom:12px"><input type="search" placeholder="Search ${items.length} items… (e.g. RTX 30, Antminer, Kaspa)" value="${esc(this.shopFilter || '')}" data-change="shop-filter" style="flex:1;min-width:220px">
+      ${['gpu', 'asic'].includes(this.shopTab) ? `<select data-change="shop-sort">${[['profit', 'Most profit / day'], ['roi', 'Best return on cost'], ['price', 'Cheapest'], ['newest', 'Newest']].map(([v, l]) => `<option value="${v}" ${(this.shopSort || 'profit') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>` : ''}</div>`;
+    return `<div class="page-head"><div><h1>Vendors</h1><div class="muted">Brand new, full warranty, full price. Click any item to inspect it in 3D.</div></div>${tabs}</div>${toolbar}
       <div class="grid">${items.map((it) => `<div class="card product">
         <div class="spread"><span class="name">${esc(it.name)}</span>${it.year ? `<span class="tag">${it.year}</span>` : ''}</div>
         ${this.specLines(it)}

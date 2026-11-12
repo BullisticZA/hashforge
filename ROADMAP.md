@@ -25,6 +25,12 @@ a sensible start should *usually* make money in the first game-year, but never g
 - **Dust** that eats cooling, intake filters, **hot/cold aisle containment**, **evaporative coolers** that struggle on humid days, ASICs that get less efficient when hot
 - South Africa: optional **daytime surplus tariff** (cheap 06:00–18:00, pricier at night)
 
+## ✅ v0.1.2: Hardware expansion
+- Catalog grows from 97 to **242 items**: 91 GPUs, 62 ASIC miners, and many more PSUs, frames, racks, cooling units, inverters, batteries, solar arrays, generators, risers and boot drives
+- New hardware types with their own 3D models: **passive datacenter cards**, **blower cards**, **headless mining cards**, **water-cooled hydro miners**, **home-heater miners**, **tiny open-source boards**, **evaporative towers**, a **20 ft container pod**
+- New mods: **fresh thermal paste** and **replacement fans** that restore worn cards
+- Shop **search and sort** (profit, payback, price, newest)
+
 ## 🔜 v0.2: Builders & Workshop
 - **Thermal work:** repaste, new thermal pads, copper shims and plates: lower temps, less wear, more hashrate
 - **Workshop tools:** screwdriver kit, multimeter, thermal camera, reflow station, BIOS programmer. Better tools unlock better repairs

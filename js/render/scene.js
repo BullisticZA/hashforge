@@ -216,10 +216,13 @@ export class MiningRoom {
       x += width + 1.2;
     });
     // Racks along the left wall
-    state.racks.forEach((rack, i) => {
+    let rz = -loc.d / 2 + 0.8;
+    state.racks.forEach((rack) => {
       const m = makeRack(byId[rack.id], rack.asics.map((a) => ({ spec: byId[a.id], q: a.q, broken: a.broken })));
+      const span = m.userData.size[0];
       m.rotation.y = Math.PI / 2;
-      m.position.set(-loc.w / 2 + 2.2, 0, -loc.d / 2 + 3 + i * 5.2);
+      m.position.set(-loc.w / 2 + 2.2 + (rack.id === 'container' ? 1.3 : 0), 0, rz + span / 2);
+      rz += span + 0.6;
       add(m, { type: 'rack', uid: rack.uid });
     });
     // Cooling on the right

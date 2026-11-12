@@ -180,6 +180,7 @@ export function gpuEffective(state, owned) {
   // GDDR6X runs hot: stock pads let the memory throttle (~110 °C) until the card is re-padded.
   let thermal = spec.mem === 'GDDR6X' && !mods.pads ? 0.85 : 1;
   if (mods.shim) thermal *= 1.03;
+  if (mods.paste) thermal *= 1.01;
   const m = q.perf * condFactor(owned) * effects(state).hash * thermal;
   return {
     hash: Object.fromEntries(GPU_ALGOS.map((a) => [a, spec.hash[a] * m])),
@@ -789,11 +790,19 @@ export function applyMod(state, gpuUid, modUid) {
   const mod = byId[state.inventory[mi].id];
   const gpu = found.owned;
   gpu.mods = gpu.mods || {};
+  if (mod.consumable) {
+    // One-off service items (e.g. new fans) restore condition and are used up.
+    if ((gpu.cond ?? 1) >= 0.99) return fail('This card is already in perfect condition.');
+    state.inventory.splice(mi, 1);
+    gpu.cond = Math.min(1, (gpu.cond ?? 1) + 0.25);
+    addLog(state, 'craft', `Fitted new fans to a ${byId[gpu.id].name}.`);
+    return { ok: true };
+  }
   if (gpu.mods[mod.id]) return fail('This card already has that mod.');
   if (mod.needs && !gpu.mods[mod.needs]) return fail('Apply fresh thermal pads first.');
   state.inventory.splice(mi, 1);
   gpu.mods[mod.id] = true;
-  addLog(state, 'craft', `${mod.id === 'pads' ? 'Re-padded' : 'Copper-shimmed'} a ${byId[gpu.id].name}.`);
+  addLog(state, 'craft', `${{ pads: 'Re-padded', shim: 'Copper-shimmed', paste: 'Re-pasted' }[mod.id] || 'Modded'} a ${byId[gpu.id].name}.`);
   return { ok: true };
 }
 
@@ -1039,7 +1048,7 @@ function stepWear(state, room) {
   const wearOne = (owned, label) => {
     if (owned.broken) return;
     const q = QUALITY[owned.q || 'new'];
-    const padded = owned.mods?.shim ? 0.55 : owned.mods?.pads ? 0.7 : 1;
+    const padded = (owned.mods?.shim ? 0.55 : owned.mods?.pads ? 0.7 : 1) * (owned.mods?.paste ? 0.85 : 1);
     owned.cond = Math.max(0, (owned.cond ?? 1) - 0.0008 * (1 + heat) * fx.wear * padded);
     const p = 0.0006 * q.fail * (1 + 3 * (1 - owned.cond)) * (1 + heat) * fx.wear * padded;
     if (rng(state) < p) {
@@ -1129,7 +1138,9 @@ export function advance(state, hours) {
     const t = tariffUsd(state) * tariffHourMult(state);
     const gridKwh = online ? flow.gridKwh : (flow.gridUp ? flow.gridKwh - demandKw : 0);
     const gridCost = Math.max(0, gridKwh) * t;
-    const dieselCost = online ? flow.generatorKwh * byId.generator.litresPerKwh * DIESEL_USD_PER_LITRE : 0;
+    const gens = state.energy.generators.map((g) => byId[g.id]);
+    const litresPerKwh = gens.length ? gens.reduce((a, g) => a + g.litresPerKwh * g.kw, 0) / gens.reduce((a, g) => a + g.kw, 0) : 0.3;
+    const dieselCost = online ? flow.generatorKwh * litresPerKwh * DIESEL_USD_PER_LITRE : 0;
     if (online || flow.batteryIn) applyBatteryFlow(state, online ? flow.batteryOut : 0, flow.batteryIn);
 
     state.cash += gross;

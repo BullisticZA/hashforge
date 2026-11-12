@@ -27,11 +27,11 @@ const M = {
   black: () => mat('black', () => new THREE.MeshStandardMaterial({ color: '#0b0c0f', metalness: 0.3, roughness: 0.55 })),
   blade: () => mat('blade', () => new THREE.MeshStandardMaterial({ color: '#16181d', metalness: 0.1, roughness: 0.45, side: THREE.DoubleSide })),
   bladeClear: () => mat('bladeClear', () => new THREE.MeshPhysicalMaterial({ color: '#cfe8ff', metalness: 0, roughness: 0.1, transmission: 0.6, transparent: true, opacity: 0.7, side: THREE.DoubleSide })),
-  plastic: (c = '#e9ecef') => mat(`plastic${c}`, () => new THREE.MeshStandardMaterial({ color: c, metalness: 0.05, roughness: 0.5 })),
+  plastic: (c = '#e9ecef') => mat(`plastic${c}`, () => new THREE.MeshStandardMaterial({ color: new THREE.Color(c).multiplyScalar(0.5), metalness: 0.05, roughness: 0.5, envMapIntensity: 0.35 })),
   rubber: () => mat('rubber', () => new THREE.MeshStandardMaterial({ color: '#1d1f23', roughness: 0.9 })),
-  glow: (c) => mat(`glow${c}`, () => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 1.15, toneMapped: false })),
+  glow: (c) => mat(`glow${c}`, () => new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 1.5, toneMapped: false })),
   glass: () => mat('glass', () => new THREE.MeshPhysicalMaterial({ color: '#9fd8ff', metalness: 0, roughness: 0.05, transmission: 0.9, transparent: true, opacity: 0.25 })),
-  solar: () => mat('solar', () => new THREE.MeshPhysicalMaterial({ color: '#0e1d3f', metalness: 0.6, roughness: 0.15, clearcoat: 1 })),
+  solar: () => mat('solar', () => new THREE.MeshPhysicalMaterial({ color: '#1b3a7a', metalness: 0.5, roughness: 0.2, clearcoat: 1, emissive: '#0a1a3d', emissiveIntensity: 0.35 })),
   rust: () => mat('rust', () => new THREE.MeshStandardMaterial({ color: '#5a3a28', metalness: 0.4, roughness: 0.9 })),
   goldTrim: () => mat('goldTrim', () => new THREE.MeshStandardMaterial({ color: '#ffd166', metalness: 1, roughness: 0.15, emissive: '#5a3d00', emissiveIntensity: 0.6 })),
   liquid: () => mat('liquid', () => new THREE.MeshPhysicalMaterial({ color: '#3fa9ff', transmission: 0.7, transparent: true, opacity: 0.55, roughness: 0.05 })),
@@ -151,7 +151,7 @@ export function makeGPU(spec, { q = 'new', detail = 'full', broken = false } = {
   const root = new THREE.Group();
   const L = spec.length / 100;
   const H = 1.25;
-  const T = spec.fans >= 3 ? 0.62 : spec.fans === 2 ? 0.5 : 0.42;
+  const T = spec.fans >= 3 ? 0.62 : spec.fans === 2 ? 0.5 : spec.passive ? 0.45 : 0.42;
   const accent = broken ? '#ff3b3b' : ACCENT[spec.vendor] || '#5ee7ff';
   const tint = q === 'scrap' ? '#3a3128' : spec.vendor === 'amd' ? '#2c2a30' : spec.vendor === 'intel' ? '#283044' : '#2b3038';
   const layers = { backplate: new THREE.Group(), pcb: new THREE.Group(), heatsink: new THREE.Group(), shroud: new THREE.Group(), fans: new THREE.Group() };
@@ -209,7 +209,7 @@ export function makeGPU(spec, { q = 'new', detail = 'full', broken = false } = {
     layers.shroud.add(box(L * 0.98, 0.025, 0.025, M.goldTrim(), 0, H / 2 - 0.01, T / 2 + 0.005));
   }
   // Angular accent inlays between the fans
-  if (detail === 'full') {
+  if (detail === 'full' && spec.fans > 0) {
     const inlay = M.aluDark();
     for (let i = 0; i <= spec.fans; i++) {
       const x = Math.max(-L / 2 + 0.25, Math.min(L / 2 - 0.25, -L / 2 + 0.25 + (L - 0.5) * (i / spec.fans) + 0.1));
@@ -229,12 +229,20 @@ export function makeGPU(spec, { q = 'new', detail = 'full', broken = false } = {
     layers.shroud.add(name);
   }
 
-  // Fans
-  const fanR = Math.min(H * 0.43, (L - 0.4) / (spec.fans * 2.05));
-  for (let i = 0; i < spec.fans; i++) {
+  // Fans (blower cards have one radial fan at the end; passive cards have none - a sealed fin tunnel)
+  if (spec.passive) {
+    layers.shroud.add(box(L * 0.96, H * 0.94, 0.04, M.alu(), 0, 0, T / 2 + 0.005, 0.02));
+    const slots = [];
+    for (let i = 0; i < 14; i++) slots.push([-L / 2 + 0.3 + i * (L - 0.6) / 13, 0, T / 2 + 0.03]);
+    layers.shroud.add(instancedBoxes(0.05, H * 0.7, 0.01, M.black(), slots));
+  }
+  const fanCount = spec.blower ? 1 : spec.fans;
+  const fanR = spec.blower ? H * 0.32 : Math.min(H * 0.43, (L - 0.4) / (Math.max(1, spec.fans) * 2.05));
+  if (spec.blower) layers.shroud.add(box(L * 0.6, H * 0.8, 0.02, M.black(), -L * 0.15, 0, T / 2 + 0.003));
+  for (let i = 0; i < fanCount; i++) {
     const fan = makeFan(fanR, accent, { blades: detail === 'full' ? 11 : 7, ledRing: detail === 'full' });
-    const x = -L / 2 + 0.25 + (L - 0.5) * ((i + 0.5) / spec.fans);
-    fan.position.set(x + 0.1, 0, T / 2 + 0.005);
+    const x = spec.blower ? L / 2 - fanR - 0.2 : -L / 2 + 0.25 + (L - 0.5) * ((i + 0.5) / spec.fans);
+    fan.position.set(x + (spec.blower ? 0 : 0.1), 0, T / 2 + 0.005);
     layers.fans.add(fan);
     spinners.push(fan.userData.spinner);
     if (fan.userData.leds) leds.push(...fan.userData.leds);
@@ -243,7 +251,7 @@ export function makeGPU(spec, { q = 'new', detail = 'full', broken = false } = {
   // I/O bracket with display outputs, and power connectors on the top edge
   const bracket = new THREE.Group();
   bracket.add(box(0.03, H * 1.08, T + 0.05, M.alu(), -L / 2 - 0.03, 0.03, 0));
-  if (detail === 'full') {
+  if (detail === 'full' && !spec.headless) {
     for (let i = 0; i < 4; i++) bracket.add(box(0.035, 0.09, 0.16, M.black(), -L / 2 - 0.045, -0.35 + i * 0.2, -T / 2 + 0.15));
     const holes = [];
     for (let i = 0; i < 5; i++) for (let j = 0; j < 2; j++) holes.push([-L / 2 - 0.045, 0.15 + i * 0.09, j * 0.12]);
@@ -282,6 +290,7 @@ export function makeGPU(spec, { q = 'new', detail = 'full', broken = false } = {
 // ------------------------------------------------------------------ ASIC miner
 
 export function makeASIC(spec, { q = 'new', broken = false, detail = 'full' } = {}) {
+  if (['hydro', 'heater', 'tiny'].includes(spec.style)) return makeSpecialMiner(spec, { q, broken, detail });
   const g = new THREE.Group();
   const style = spec.style;
   const dims = style === 'tall' ? [3.9, 2.25, 2.35] : style === 'mini' ? [1.4, 0.7, 1.2] : style === 'quiet' ? [3.0, 1.4, 2.6] : [4.0, 1.95, 2.9];
@@ -348,6 +357,54 @@ export function makeASIC(spec, { q = 'new', broken = false, detail = 'full' } = 
   }
   if (q === 'golden') g.add(box(L * 0.82, 0.03, 0.03, M.goldTrim(), 0, H / 2 + 0.06, D / 2));
   g.userData = { kind: 'asic', spinners, leds, blink: [act], size: [L, H + 0.6, D] };
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
+/** Water-cooled hydro miners, home-heater miners and tiny open-source boards. */
+function makeSpecialMiner(spec, { q, broken, detail }) {
+  const g = new THREE.Group();
+  const leds = []; const spinners = [];
+  const ok = M.glow(broken ? '#ff3b3b' : '#33ff88');
+  if (spec.style === 'hydro') {
+    // Slim chassis with water in/out on the front, no fans: needs a chiller loop
+    g.add(box(3.6, 0.9, 2.6, q === 'scrap' ? M.rust() : M.alu(), 0, 0, 0, 0.04));
+    for (const [y, c] of [[0.18, '#3b82f6'], [-0.18, '#ef4444']]) {
+      const pipe = cylinder(0.09, 0.5, M.plastic(c), 14);
+      pipe.rotation.z = Math.PI / 2;
+      pipe.position.set(1.95, y, 0.8);
+      g.add(pipe);
+      const fit = cylinder(0.12, 0.12, M.copper(), 14); fit.rotation.z = Math.PI / 2; fit.position.set(1.82, y, 0.8); g.add(fit);
+    }
+    const led = box(0.06, 0.06, 0.03, ok, 1.81, 0.3, -0.6); g.add(led); leds.push(led);
+    if (detail === 'full') { const t = label(spec.name, 1.8, 0.24, { bg: '#e8ebef', color: '#1b2533' }); t.position.set(-0.4, 0, 1.306); g.add(t); }
+    g.userData = { kind: 'asic', spinners, leds, blink: [led], size: [3.9, 0.9, 2.6] };
+  } else if (spec.style === 'heater') {
+    // Living-room friendly: rounded white body, top vent grille, a little display
+    const big = spec.hashrate > 10;
+    const [w, h, d] = big ? [2.4, 2.8, 1.1] : [1.1, 1.2, 0.8];
+    g.add(box(w, h, d, M.plastic('#454c57'), 0, 0, 0, 0.18));
+    const vents = [];
+    for (let i = 0; i < 9; i++) vents.push([-w * 0.35 + i * w * 0.0875, h / 2 + 0.005, 0]);
+    g.add(instancedBoxes(0.04, 0.01, d * 0.7, M.satin(), vents));
+    const screen = box(w * 0.4, h * 0.12, 0.02, M.glow('#ff9f43'), 0, h * 0.2, d / 2 + 0.005);
+    g.add(screen); leds.push(screen);
+    const fan = makeFan(Math.min(w, d) * 0.3, '#9fb4d8', { blades: 7, frame: 'none', ledRing: false });
+    fan.rotation.x = -Math.PI / 2; fan.position.set(0, h / 2 - 0.05, 0);
+    g.add(fan); spinners.push(fan.userData.spinner);
+    g.userData = { kind: 'asic', spinners, leds, blink: [], size: [w, h, d] };
+  } else {
+    // Open-source single-chip board: PCB, heatsink, 40 mm fan, USB-C power and a small OLED
+    g.add(box(1.0, 0.03, 0.7, M.pcbGreen(), 0, 0.015, 0));
+    g.add(box(0.5, 0.18, 0.5, M.aluDark(), 0, 0.12, 0));
+    const fan = makeFan(0.22, '#5ee7ff', { blades: 7, frame: 'square', ledRing: false });
+    fan.rotation.x = -Math.PI / 2; fan.position.set(0, 0.3, 0);
+    g.add(fan); spinners.push(fan.userData.spinner);
+    const oled = box(0.25, 0.01, 0.13, M.glow('#7dd3fc'), 0.35, 0.04, -0.22);
+    g.add(oled); leds.push(oled);
+    g.add(box(0.12, 0.05, 0.08, M.alu(), -0.5, 0.04, 0.2));
+    g.userData = { kind: 'asic', spinners, leds, blink: [], size: [1.0, 0.45, 0.7] };
+  }
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return g;
 }
@@ -614,17 +671,41 @@ export function makeRig(frameSpec, gpus, psus, { detail = 'lite', risers = [], b
 export function makeRack(spec, asics) {
   const g = new THREE.Group();
   const spinners = []; const leds = [];
-  const perShelf = 1;
+  // Racks hold at most four levels; bigger racks grow sideways into extra bays
   const shelfH = spec.style === 'cabinet' ? 2.65 : 2.75;
-  const levels = Math.ceil(spec.units / perShelf);
-  const W = 4.6; const D = 3.2; const H = levels * shelfH + 0.4;
+  const levels = Math.min(spec.units, 4);
+  const bays = Math.ceil(spec.units / levels);
+  const BW = 4.6; const W = bays * BW; const D = 3.2; const H = levels * shelfH + 0.4;
   const metal = spec.style === 'shelf' ? M.aluDark() : M.satin();
-  for (const x of [-W / 2, W / 2]) for (const z of [-D / 2, D / 2]) g.add(box(0.1, H, 0.1, metal, x, H / 2, z));
+  const x0 = -W / 2;
+  for (let b = 0; b <= bays; b++) for (const z of [-D / 2, D / 2]) g.add(box(0.1, H, 0.1, metal, x0 + b * BW, H / 2, z));
   for (let i = 0; i <= levels; i++) g.add(box(W, 0.06, D, spec.style === 'shelf' ? M.aluDark() : M.black(), 0, 0.1 + i * shelfH, 0));
-  if (spec.style === 'cabinet') {
+  if (spec.style === 'cabinet' && spec.id !== 'container') {
     g.add(box(W, H, 0.05, M.black(), 0, H / 2, -D / 2));
     g.add(box(0.05, H, D, M.black(), -W / 2, H / 2, 0), box(0.05, H, D, M.black(), W / 2, H / 2, 0));
     g.add(box(W, 0.1, D, M.black(), 0, H, 0));
+  }
+  if (spec.id === 'container') {
+    // 20 ft steel box: corrugated walls, roof, open doors at one end, exhaust fans on the back wall
+    const CW = W + 1.4; const CH = H + 1.0; const CD = D + 2.6;
+    const steel = M.plastic('#2f6f8f');
+    g.add(box(CW, 0.25, CD, steel, 0, 0.02, 0));
+    g.add(box(CW, 0.2, CD, steel, 0, CH, 0));
+    g.add(box(CW, CH, 0.12, steel, 0, CH / 2, -CD / 2));
+    const ribs = [];
+    for (let i = 0; i < Math.floor(CW / 0.5); i++) ribs.push([-CW / 2 + 0.25 + i * 0.5, CH / 2, -CD / 2 - 0.08]);
+    g.add(instancedBoxes(0.18, CH - 0.2, 0.06, steel, ribs));
+    for (const sx of [-1, 1]) {
+      g.add(box(0.12, CH, CD, steel, sx * CW / 2, CH / 2, 0));
+      const door = box(0.08, CH - 0.2, CD / 2, steel, sx * (CW / 2 + CD / 4), CH / 2, CD / 2 + 0.02);
+      door.rotation.y = sx * 1.3; door.position.set(sx * (CW / 2 + 0.2), CH / 2, CD / 2 + CD / 4 - 0.2);
+      g.add(door);
+    }
+    for (let i = 0; i < bays; i++) {
+      const fan = makeFan(0.9, '#9fb4d8', { frame: 'square', ledRing: false, blades: 6 });
+      fan.position.set(x0 + BW / 2 + i * BW, CH * 0.6, -CD / 2 + 0.2);
+      g.add(fan); spinners.push(fan.userData.spinner);
+    }
   }
   // PDU strip with indicator
   const pdu = box(0.15, H * 0.8, 0.15, M.black(), W / 2 - 0.15, H * 0.45, -D / 2 + 0.2);
@@ -632,14 +713,16 @@ export function makeRack(spec, asics) {
   const pduLed = box(0.06, 0.06, 0.05, M.glow('#5ee7ff'), W / 2 - 0.15, H * 0.85, -D / 2 + 0.29);
   g.add(pduLed); leds.push(pduLed);
   asics.forEach((a, i) => {
+    const bay = Math.floor(i / levels); const lvl = i % levels;
     const m = makeASIC(a.spec, { q: a.q, broken: a.broken, detail: 'lite' });
     m.rotation.y = Math.PI / 2;
-    m.scale.setScalar(Math.min(1, (W - 0.3) / m.userData.size[0], 2.4 / m.userData.size[1]));
-    m.position.set(0, 0.15 + i * shelfH + (m.userData.size[1] * m.scale.y) / 2 - 0.25, 0);
+    m.scale.setScalar(Math.min(1, (BW - 0.3) / m.userData.size[0], 2.4 / m.userData.size[1]));
+    m.position.set(x0 + BW / 2 + bay * BW, 0.15 + lvl * shelfH + (m.userData.size[1] * m.scale.y) / 2 - 0.25, 0);
     g.add(m);
     spinners.push(...m.userData.spinners); leds.push(...m.userData.leds);
   });
-  g.userData = { kind: 'rack', spinners, leds, pduLed, size: [W, H, D] };
+  const footW = spec.id === 'container' ? W + 1.4 : W;
+  g.userData = { kind: 'rack', spinners, leds, pduLed, size: [footW, H, D] };
   return g;
 }
 
@@ -689,6 +772,19 @@ export function makeCooling(spec) {
       fan.position.set(-0.5 + i * 1.0, 5.22, 0);
       g.add(fan); spinners.push(fan.userData.spinner);
     }
+  } else if (spec.style === 'evap') {
+    // Swamp cooler: wet honeycomb pads on three sides, a big fan blowing out the front
+    const big = spec.id === 'evaptower';
+    const [w, h, d] = big ? [3.2, 4.4, 3.2] : [1.6, 2.6, 1.4];
+    g.add(box(w, h, d, M.plastic('#d7dce2'), 0, h / 2, 0, 0.08));
+    const pad = M.plastic('#c79a4a');
+    g.add(box(0.04, h * 0.6, d * 0.8, pad, -w / 2 - 0.02, h * 0.5, 0), box(0.04, h * 0.6, d * 0.8, pad, w / 2 + 0.02, h * 0.5, 0));
+    g.add(box(w * 0.8, h * 0.6, 0.04, pad, 0, h * 0.5, -d / 2 - 0.02));
+    const fan = makeFan(Math.min(w, h) * 0.32, '#9fb4d8', { frame: 'none', ledRing: false, blades: 5 });
+    fan.position.set(0, h * 0.55, d / 2 + 0.05);
+    g.add(fan); spinners.push(fan.userData.spinner);
+    const gr = grille(Math.min(w, h) * 0.34); gr.position.set(0, h * 0.55, d / 2 + 0.1); g.add(gr);
+    const lamp = box(0.2, 0.08, 0.02, M.glow('#3fa9ff'), w * 0.3, h * 0.9, d / 2 + 0.01); g.add(lamp); leds.push(lamp);
   } else if (spec.style === 'tank') {
     g.add(box(4.5, 2.2, 2.2, M.satin(), 0, 1.1, 0, 0.06));
     const liquid = box(4.2, 1.6, 1.9, M.liquid(), 0, 1.35, 0);
@@ -737,7 +833,7 @@ export function makeBattery(spec, soc = 0, capacity = 1) {
 
 export function makeSolar(spec) {
   const g = new THREE.Group();
-  const panels = Math.max(4, Math.round(spec.kwp / 0.55));
+  const panels = Math.min(40, Math.max(4, Math.round(spec.kwp / 0.55)));
   const cols = Math.min(10, Math.ceil(Math.sqrt(panels * 2)));
   const rows = Math.ceil(panels / cols);
   for (let i = 0; i < panels; i++) {
@@ -748,11 +844,11 @@ export function makeSolar(spec) {
     const cells = [];
     for (let k = 1; k < 6; k++) cells.push([0, 0.03, -1.1 + k * 0.37]);
     p.add(instancedBoxes(1.08, 0.005, 0.012, M.alu(), cells));
-    p.position.set(c * 1.2 - (cols * 1.2) / 2, r * 0.8, -r * 2.0);
-    p.rotation.x = -0.45;
+    p.position.set(c * 1.2 - (cols * 1.2) / 2, 0.6, -r * 2.4);
+    p.rotation.x = 0.45;
     g.add(p);
   }
-  g.userData = { kind: 'solar', spinners: [], leds: [], size: [cols * 1.2, rows, rows * 2.3] };
+  g.userData = { kind: 'solar', spinners: [], leds: [], size: [cols * 1.2, 1.4, rows * 2.4] };
   return g;
 }
 
