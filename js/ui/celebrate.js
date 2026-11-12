@@ -2,7 +2,7 @@
 
 let canvas = null; let ctx = null; let bits = []; let running = false;
 const COLORS = ['#5ee7ff', '#8b5cf6', '#ffd166', '#34d399', '#f472b6', '#ffffff'];
-const reduced = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+const reduced = () => document.body.classList.contains('calm') || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 
 function ensure() {
   if (canvas) return;
@@ -43,6 +43,7 @@ function step() {
 
 /** Full-screen "LEVEL 7" moment. */
 export function banner(big, small, kind = 'level') {
+  if (reduced()) return;
   const el = document.createElement('div');
   el.className = `banner ${kind}`;
   el.innerHTML = `<div class="banner-big"></div><div class="banner-small"></div>`;

@@ -261,6 +261,7 @@ export class FloorPlan {
 
   /** Income floats up from whatever is earning, sized to what it made since the last pop. */
   drawPops(ctx, spots, time, s, dark) {
+    if (this.calm) { this.pops = []; return; }
     const every = 1.1;
     if (!dark && this.speed > 0 && spots.length && time - this.lastSpawn > every) {
       const elapsed = Math.min(3, time - this.lastSpawn);

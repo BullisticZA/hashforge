@@ -18,6 +18,7 @@ const SPEEDS = [0, 1, 6, 24, 96];          // game hours per real second
 const $ = (sel) => document.querySelector(sel);
 
 const SLOTS_KEY = 'hashforge-slots-v1';
+const CALM_KEY = 'hashforge-calm';
 // Grouped menu: run the operation, buy hardware, build things, grow.
 const NAV = [
   ['Run', [['floor', '🏭', 'Floor'], ['servers', '🖥️', 'Servers'], ['clients', '🤝', 'Clients'], ['power', '⚡', 'Power']]],
@@ -43,6 +44,9 @@ export class App {
     this.selection = null;
     this.bench = {};
     this.lastRender = 0;
+    // Calm mode: no animations and a slow redraw, so the game stays light next to video or other apps.
+    try { this.calm = localStorage.getItem(CALM_KEY) === 'on'; } catch { this.calm = false; }
+    document.body.classList.toggle('calm', this.calm);
     this.load();
     C.ensure(this.state);
     C.tick(this.state);               // settle XP and badges from before this session quietly
@@ -104,16 +108,17 @@ export class App {
       if (this.state.log[0] !== logBefore) this.announce(this.state.log[0]);
     }
     this.room = E.roomStats(this.state);
-    if (this.floor && this.view === 'floor') { this.floor.speed = speed; this.floor.draw(this.state, this.room, now / 1000); }
+    if (this.floor && this.view === 'floor') { this.floor.speed = speed; this.floor.calm = this.calm; this.floor.draw(this.state, this.room, this.calm ? 0 : now / 1000); }
     // Cash counts up (or down) smoothly instead of jumping.
     const cash = this.state.cash;
-    this.cashShown += (cash - this.cashShown) * Math.min(1, dt * 6);
+    this.cashShown = this.calm ? cash : this.cashShown + (cash - this.cashShown) * Math.min(1, dt * 6);
     if (Math.abs(cash - this.cashShown) < 0.005) this.cashShown = cash;
     const cashEl = document.getElementById('hud-cash');
     if (cashEl) { const t = this.money(this.cashShown); if (cashEl.textContent !== t) cashEl.textContent = t; }
     if (this.tour) this.tour.sync(this.state, this.room, E.location(this.state));
-    if (now - this.lastRender > 400) { this.lastRender = now; this.render(); }
-    requestAnimationFrame((t) => this.loop(t));
+    if (now - this.lastRender > (this.calm ? 1000 : 400)) { this.lastRender = now; this.render(); }
+    if (this.calm && !this.tour && !this.viewerOpen()) setTimeout(() => this.loop(performance.now()), 250);   // 4 frames a second
+    else requestAnimationFrame((t) => this.loop(t));
   }
 
   announce(entry) {
@@ -361,6 +366,13 @@ export class App {
         break;
       }
       case 'start-play': this.closeStart(); break;
+      case 'calm':
+        this.calm = !this.calm;
+        try { localStorage.setItem(CALM_KEY, this.calm ? 'on' : 'off'); } catch { /* storage unavailable */ }
+        document.body.classList.toggle('calm', this.calm);
+        this.toast(this.calm ? 'Calm mode on: animations off, lighter on your PC' : 'Animations back on', 'good');
+        this.render(true);
+        break;
       case 'sound': setSound(!soundOn()); if (soundOn()) sfx.coin(); this.render(true); break;
       default: break;
     }
@@ -414,6 +426,7 @@ export class App {
       ${s.prestige.forks ? tile('Era', `Fork ${s.prestige.forks}`, 'warn') : ''}
       ${buffs.length ? `<div class="buffs">${buffs.map((b) => `<span class="buff" title="${esc(b.label)}">${b.kind === 'hash' ? '⚡' : b.kind === 'tariff' ? '🔌' : '🏷️'} ${esc(b.label)} · ${Math.ceil(b.untilDay - s.day)}d</span>`).join('')}</div>` : ''}
       <div class="hud-right">
+        <button class="icon-btn sound" data-action="calm" title="${this.calm ? 'Calm mode is on (no animations). Click to turn animations back on' : 'Turn off animations (calm mode): lighter on your PC'}">${this.calm ? '🐢' : '✨'}</button>
         <button class="icon-btn sound" data-action="sound" title="Sound ${soundOn() ? 'on' : 'off'}">${soundOn() ? '🔊' : '🔇'}</button>
         <div class="speed">${SPEEDS.map((sp, i) => `<button class="${i === this.speedIndex ? 'on' : ''}" data-action="speed" data-arg="${i}" title="${sp ? `${sp} game hours per second (key ${i})` : 'Pause (space)'}">${sp ? `${sp}×` : '❚❚'}</button>`).join('')}</div>
       </div>`;
@@ -1102,6 +1115,7 @@ export class App {
           <div class="row"><span>${reg.symbol}</span><input type="number" step="0.01" min="0.01" value="${s.tariffLocal}" data-change="tariff" style="width:110px"><span>per kWh</span></div>
           <div class="small muted" style="margin-top:6px">Set it to the rate on your own electricity bill: every municipality and plan differs. Exchange rate: 1 USD = ${s.fx.toFixed(2)} ${reg.currency}${this.fxLive ? ' (live)' : ' (offline estimate)'}.</div></div>
         <div class="card"><h3>Game</h3><div class="small muted">Space pauses; keys 1-4 change speed.</div>
+          <label class="row small" style="margin-top:8px"><input type="checkbox" data-action="calm" ${this.calm ? 'checked' : ''}> Calm mode: switch off animations and redraw slowly (use this if videos or other apps lag)</label>
           <label class="row small" style="margin-top:8px"><input type="checkbox" data-action="auto-install" ${s.autoInstall !== false ? 'checked' : ''}> Install new parts into a rig or machine automatically</label>
           <button class="btn danger" style="margin-top:8px" data-action="new-game">Start a new game</button></div>
       </div>
@@ -1146,12 +1160,13 @@ export class App {
     (out.achievements || []).slice(0, 3).forEach((a, i) => setTimeout(() => {
       this.toast(`${a.icon} Badge unlocked: ${a.name}${a.reward ? ` (+${m(a.reward)})` : ''}`, 'gold');
       sfx.badge();
-      confetti({ x: 0.5, y: 0.2, count: 70, spread: 0.8 });
+      if (!this.calm) confetti({ x: 0.5, y: 0.2, count: 70, spread: 0.8 });
     }, i * 700));
     if ((out.achievements || []).length > 3) this.toast(`…and ${out.achievements.length - 3} more badges. See Career.`, 'gold');
     (out.levelUps || []).slice(-1).forEach((u) => {
-      banner(`LEVEL ${u.level}`, u.rank ? `New rank: ${u.rank}` : `Level bonus +${m(u.reward)}`);
       sfx.level();
+      if (this.calm) { this.toast(`⭐ Level ${u.level}${u.rank ? `: ${u.rank}` : ''}! Bonus +${m(u.reward)}`, 'gold'); return; }
+      banner(`LEVEL ${u.level}`, u.rank ? `New rank: ${u.rank}` : `Level bonus +${m(u.reward)}`);
       confetti({ count: 200, spread: 1.2 });
     });
     (out.jobs || []).forEach((j) => { this.toast(`📋 Contract complete: ${j.title}. Claim it!`, 'good'); sfx.alert(); });
@@ -1276,11 +1291,14 @@ export class App {
 
   // ---------------------------------------------------------------- 3D overlays
 
+  viewerOpen() { return !$('#overlay').hidden; }
+
   async ensureViewer() {
     if (!this.viewer) {
       const { ProductViewer } = await import('../render/viewer.js');
       this.viewer = new ProductViewer($('#stage3d'));
     }
+    this.viewer.renderer.setAnimationLoop(() => this.viewer.frame());   // paused while the 3D window is closed
     return this.viewer;
   }
 
@@ -1294,7 +1312,7 @@ export class App {
     $('#overlay').hidden = true;
     this.overlayMode = null;
     if (this.tour) { this.tour.renderer.setAnimationLoop(null); this.tour.renderer.domElement.remove(); this.tour = null; }
-    if (this.viewer) this.viewer.renderer.domElement.style.display = '';
+    if (this.viewer) { this.viewer.renderer.domElement.style.display = ''; this.viewer.renderer.setAnimationLoop(null); }
     this.render(true);
   }
 

@@ -313,3 +313,8 @@ table.clients select { font-size: 12px; padding: 3px 6px; }
 .btn.fix-bad { border-color: var(--bad); color: #fff; background: #5a1d1d; }
 .part-row { grid-template-columns: minmax(110px, 1fr) auto auto auto auto; }
 .part-row .name { white-space: normal; overflow: visible; line-height: 1.25; }
+
+/* Calm mode: nothing moves, no blur, no glow work for the GPU */
+body.calm *, body.calm *::before, body.calm *::after { animation: none !important; transition: none !important; }
+body.calm #start, body.calm #overlay, body.calm .toast { backdrop-filter: none !important; }
+body.calm .goal-card::after { display: none; }
