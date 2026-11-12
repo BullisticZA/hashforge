@@ -270,7 +270,7 @@ test('bills arrive every 30 days and match grid energy', () => {
 test('the market moves, difficulty rises and halvings happen', () => {
   const s = fresh();
   E.advance(s, 24 * 700);
-  for (const a of Object.keys(ALGOS)) assert.ok(s.market.difficulty[a] > 1.3);
+  for (const a of Object.keys(ALGOS)) assert.ok(s.market.difficulty[a] > 1.1, `${a} difficulty rises`);
   assert.equal(s.market.halvings, 1);
 });
 

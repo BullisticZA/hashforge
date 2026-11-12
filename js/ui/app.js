@@ -656,7 +656,26 @@ export class App {
           <span>Grid cost</span><span>${m(s.power.gridCost)}</span><span>Diesel</span><span>${m(s.power.dieselCost)}</span>
           <span>Bill due</span><span>Day ${Math.floor(s.power.lastBillDay + 30) + 1}</span></div>
           ${bill ? `<div class="small muted" style="margin-top:8px">Last bill: ${Math.round(bill.kwh).toLocaleString()} kWh, ${m(bill.total)}</div>` : ''}</div>
-      </div>`;
+      </div>
+      ${this.energyGearHtml()}`;
+  }
+
+  /** Every inverter, battery, solar array and generator, with 3D and Sell buttons. */
+  energyGearHtml() {
+    const s = this.state; const m = this.money;
+    const groups = [['Inverters', s.energy.inverters], ['Batteries', s.energy.batteries], ['Solar', s.energy.solar], ['Generators', s.energy.generators]];
+    const detail = (o) => {
+      const spec = byId[o.id];
+      if (spec.kind === 'battery') return `${spec.kwh} kWh · ${Math.round((1 - (o.wear || 0)) * 100)}% capacity left · ${((o.soc || 0)).toFixed(1)} kWh stored`;
+      if (spec.kind === 'inverter') return `${spec.kw} kW · ${Math.round(spec.efficiency * 100)}% efficient${o.broken ? ' · <span class="bad">failed</span>' : ''}`;
+      if (spec.kind === 'solar') return `${spec.kwp} kWp`;
+      return `${spec.kw} kW`;
+    };
+    const rows = groups.filter(([, list]) => list.length).map(([title, list]) => `<div class="part-head">${title}</div>${list.map((o) => `<div class="part-row gear">
+      <span class="name">${esc(byId[o.id].name)}</span><span class="small muted">${detail(o)}</span>
+      <button class="btn small-btn" data-action="inspect" data-id="${o.id}" data-uid="${o.uid}">3D</button>
+      <button class="btn danger small-btn" data-action="sell" data-uid="${o.uid}">Sell ${m(E.sellValue(s, o))}</button></div>`).join('')}`).join('');
+    return `<div class="card" style="margin-top:12px"><h3>Your power equipment</h3>${rows || '<div class="small muted">No inverters, batteries, solar or generators yet.</div>'}</div>`;
   }
 
   viewMarket() {

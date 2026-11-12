@@ -983,7 +983,8 @@ function stepMarket(state) {
     const own = gaussian(state) * 0.025;
     const reversion = -0.002 * Math.log(m.index[a]);
     m.index[a] = Math.min(8, Math.max(0.15, m.index[a] * Math.exp(drift + reversion + shared + own)));
-    m.difficulty[a] *= 1 + 0.0007 + 0.0006 * Math.max(0, m.index[a] - 1);
+    // Difficulty climbs slowly, faster when prices are high (more miners join), and eases when miners unplug in a slump.
+    m.difficulty[a] *= m.index[a] < 0.7 ? 1 - 0.0001 : 1 + 0.0005 + Math.min(0.001, 0.0003 * Math.max(0, m.index[a] - 1));
     m.history[a].push(+m.index[a].toFixed(4));
     if (m.history[a].length > 120) m.history[a].shift();
   }
@@ -994,13 +995,16 @@ function stepGrid(state) {
   const g = state.grid;
   if (reg.loadShedding) {
     if (--g.stageDaysLeft <= 0) {
+      // The grid pulls back toward a "normal" level: around Stage 1 in summer, Stage 3 in winter.
+      // High stages are crisis spikes that ease off quickly instead of sticking at Stage 8.
       const winter = ['za', 'au'].includes(state.region) ? (state.day % 365 > 140 && state.day % 365 < 250) : false;
-      const up = winter ? 0.45 : 0.3;
+      const target = winter ? 3 : 1;
+      const [up, down] = g.stage < target ? [0.45, 0.15] : g.stage > target ? [0.1, 0.6] : [0.22, 0.28];
       const roll = rng(state);
       const before = g.stage;
-      if (roll < up) g.stage = Math.min(8, g.stage + 1 + (rng(state) < 0.25 ? 1 : 0));
-      else if (roll < up + 0.4) g.stage = Math.max(0, g.stage - 1);
-      g.stageDaysLeft = 2 + Math.floor(rng(state) * 6);
+      if (roll < up) g.stage = Math.min(8, g.stage + 1 + (g.stage >= 2 && rng(state) < 0.1 ? 1 : 0));
+      else if (roll < up + down) g.stage = Math.max(0, g.stage - (g.stage >= 6 ? 2 : 1));
+      g.stageDaysLeft = g.stage >= 6 ? 1 + Math.floor(rng(state) * 2) : 2 + Math.floor(rng(state) * 6);
       if (g.stage !== before) {
         addLog(state, g.stage > before ? 'warning' : 'info', g.stage === 0
           ? 'Load-shedding suspended. Enjoy it while it lasts.'
@@ -1058,8 +1062,8 @@ function stepWear(state, room) {
     if (owned.broken) return;
     const q = QUALITY[owned.q || 'new'];
     const padded = (owned.mods?.shim ? 0.55 : owned.mods?.pads ? 0.7 : 1) * (owned.mods?.paste ? 0.85 : 1);
-    owned.cond = Math.max(0, (owned.cond ?? 1) - 0.0008 * (1 + heat) * fx.wear * padded);
-    const p = 0.0006 * q.fail * (1 + 3 * (1 - owned.cond)) * (1 + heat) * fx.wear * padded;
+    owned.cond = Math.max(0, (owned.cond ?? 1) - 0.0005 * (1 + heat) * fx.wear * padded);
+    const p = 0.00035 * q.fail * (1 + 2 * (1 - owned.cond)) * (1 + heat) * fx.wear * padded;
     if (rng(state) < p) {
       owned.broken = true;
       addLog(state, 'warning', `${byId[owned.id].name}${label ? ` in ${label}` : ''} has failed. Repair or salvage it.`);

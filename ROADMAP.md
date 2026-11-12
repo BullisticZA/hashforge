@@ -38,6 +38,8 @@ a sensible start should *usually* make money in the first game-year, but never g
 - **Offline progress** with a "Welcome back" report
 - Repeated log lines (daily outages) collapse into one line with a counter
 - Advisor tells you when every rig is full and what to do about it
+- **Balance:** load-shedding settles around Stage 1 in summer and Stage 3 in winter, with short Stage 6–8 spikes instead of sticking at Stage 8; slower wear and failures; difficulty climbs more gently and eases in slumps
+- Sell inverters, batteries, solar and generators from the Power page
 
 ## 🔜 v0.2: Builders & Workshop
 - **Thermal work:** repaste, new thermal pads, copper shims and plates: lower temps, less wear, more hashrate
