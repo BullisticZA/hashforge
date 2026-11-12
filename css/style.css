@@ -307,3 +307,9 @@ table.clients select { font-size: 12px; padding: 3px 6px; }
 }
 #side > * { flex-shrink: 0; }
 @media (max-width: 700px) { .lvl-text, .brand .word { display: none; } .lvl { padding-right: 4px; } }
+
+.row-btns { display: inline-flex; gap: 5px; justify-content: flex-end; }
+.btn.fix { border-color: #6b5a2a; color: var(--gold); }
+.btn.fix-bad { border-color: var(--bad); color: #fff; background: #5a1d1d; }
+.part-row { grid-template-columns: minmax(110px, 1fr) auto auto auto auto; }
+.part-row .name { white-space: normal; overflow: visible; line-height: 1.25; }

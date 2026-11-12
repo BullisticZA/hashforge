@@ -229,6 +229,19 @@ export class App {
       }
       case 'toggle': this.result(E.toggle(s, a.uid)); this.refreshOverlay(); break;
       case 'algo': this.result(E.setRigAlgo(s, a.uid, a.value)); break;
+      case 'repair-rig': {
+        const rig = s.rigs.find((r) => r.uid === a.uid);
+        if (!rig) break;
+        let spent = 0; let n = 0; let err = '';
+        for (const o of [...rig.gpus, ...rig.psus, ...(rig.boot ? [rig.boot] : [])]) {
+          if (!o.broken && (o.cond ?? 1) >= 0.9) continue;
+          const r = E.repair(s, o.uid);
+          if (r.ok) { spent += r.cost; n++; } else { err = r.error; break; }
+        }
+        if (n) { sfx.coin(); this.toast(`Repaired ${n} part${n > 1 ? 's' : ''} for ${m(spent)}${err ? ` (stopped: ${err})` : ''}`, 'good'); } else if (err) this.toast(err, 'bad');
+        this.render(true);
+        break;
+      }
       case 'repair': {
         const res = E.repair(s, a.uid);
         if (this.result(res, res.ok ? `Repaired for ${m(res.cost)}` : '')) this.refreshOverlay();
@@ -574,18 +587,22 @@ export class App {
     const gpuRow = (g, btn) => { const i = gpuInfo(g); return row(g, `${hashrate(i.h, unit)} · ${Math.round(i.w)} W`, btn); };
     const psuRow = (p, btn) => row(p, `${byId[p.id].watts} W · ${Math.round(E.psuEfficiency(p) * 100)}%`, btn);
     const bootRow = (b, btn) => row(b, esc(byId[b.id].style === 'usb' ? 'USB flash' : byId[b.id].style === 'nvme' ? 'M.2 NVMe' : 'SATA SSD'), btn);
-    const remove = (o) => `<button class="btn small-btn" data-action="uninstall" data-arg="${rig.uid}" data-uid="${o.uid}">Remove</button>`;
-    const add = (o, full, action = 'install', label = 'Add') => `<button class="btn primary small-btn" data-action="${action}" data-arg="${rig.uid}" data-uid="${o.uid}" ${full || o.broken ? 'disabled' : ''}>${label}</button>`;
+    const fix = (o) => (o.broken || (o.cond ?? 1) < 0.9
+      ? `<button class="btn small-btn ${o.broken ? 'fix-bad' : 'fix'}" data-action="repair" data-uid="${o.uid}" title="${o.broken ? 'Repair this failed part' : 'Service it back to near-new condition'}">🔧 ${this.money(E.repairCost(s, o))}</button>` : '');
+    const remove = (o) => `<span class="row-btns">${fix(o)}<button class="btn small-btn" data-action="uninstall" data-arg="${rig.uid}" data-uid="${o.uid}">Remove</button></span>`;
+    const add = (o, full, action = 'install', label = 'Add') => `<span class="row-btns">${fix(o)}<button class="btn primary small-btn" data-action="${action}" data-arg="${rig.uid}" data-uid="${o.uid}" ${full || o.broken ? 'disabled' : ''} ${o.broken ? 'title="Repair it first"' : ''}>${label}</button></span>`;
     const gpusFull = rig.gpus.length >= frame.slots; const psusFull = rig.psus.length >= frame.psuSlots;
     const spareGpus = s.inventory.filter((o) => byId[o.id].kind === 'gpu').sort((a, b) => gpuInfo(b).h - gpuInfo(a).h);
     const sparePsus = s.inventory.filter((o) => byId[o.id].kind === 'psu').sort((a, b) => byId[b.id].watts - byId[a.id].watts);
     const spareBoot = s.inventory.filter((o) => byId[o.id].kind === 'boot');
     const empty = (t) => `<div class="small muted">${t}</div>`;
+    const worn = [...rig.gpus, ...rig.psus, ...(rig.boot ? [rig.boot] : [])].filter((o) => o.broken || (o.cond ?? 1) < 0.9);
     return `<div class="parts-grid">
       <div class="card"><h3>In this rig</h3>
         <div class="part-head">GPUs ${rig.gpus.length}/${frame.slots}</div>${rig.gpus.map((g) => gpuRow(g, remove(g))).join('') || empty('No GPUs yet.')}
         <div class="part-head">PSUs ${rig.psus.length}/${frame.psuSlots}</div>${rig.psus.map((p) => psuRow(p, remove(p))).join('') || empty('No PSU: the rig has no power.')}
-        <div class="part-head">Boot drive</div>${rig.boot ? bootRow(rig.boot, '') : empty('<span class="bad">None: the rig cannot boot.</span>')}
+        <div class="part-head">Boot drive</div>${rig.boot ? bootRow(rig.boot, `<span class="row-btns">${fix(rig.boot)}</span>`) : empty('<span class="bad">None: the rig cannot boot.</span>')}
+        ${worn.length ? `<button class="btn fix" style="margin-top:10px;width:100%" data-action="repair-rig" data-uid="${rig.uid}">🔧 Repair and service everything in this rig (${worn.length} part${worn.length > 1 ? 's' : ''}): ${this.money(worn.reduce((t, o) => t + E.repairCost(s, o), 0))}</button>` : ''}
       </div>
       <div class="card"><h3>Available in inventory</h3>
         <div class="part-head">GPUs (${spareGpus.length})${gpusFull ? ' · rig full' : ''}</div>${spareGpus.map((g) => gpuRow(g, add(g, gpusFull))).join('') || empty('No spare GPUs. Buy some from Vendors, Used or build one on the Workbench.')}
@@ -599,7 +616,7 @@ export class App {
   }
 
   repairBtn(o) {
-    if (!o.broken && (o.cond ?? 1) >= 0.99) return '';
+    if (!o.broken && (o.cond ?? 1) >= 0.9) return '';
     return `<button class="btn" data-action="repair" data-uid="${o.uid}">${o.broken ? 'Repair' : 'Service'} ${this.money(E.repairCost(this.state, o))}</button>`;
   }
 
@@ -1255,6 +1272,16 @@ export class App {
         <div class="card stat-card"><span>Cards built</span><b>${st.crafted}</b></div>
         <div class="card stat-card"><span>Hours mining</span><b>${(st.onlineHours || 0).toLocaleString()}</b></div>
       </div>`;
+  }
+
+  // ---------------------------------------------------------------- 3D overlays
+
+  async ensureViewer() {
+    if (!this.viewer) {
+      const { ProductViewer } = await import('../render/viewer.js');
+      this.viewer = new ProductViewer($('#stage3d'));
+    }
+    return this.viewer;
   }
 
   openOverlay(title) {
