@@ -17,6 +17,14 @@ a sensible start should *usually* make money in the first game-year, but never g
 - **Prestige (Hard Fork):** reset for Fork Shards, spend them on endless permanent upgrades; each era is harder
 - An advisor that watches your operation and tells you what's wrong
 
+## ✅ v0.1.1: Realism update
+- Every card stands on a **PCIe riser** with USB 3.0 cables to the motherboard and real power routing from the PSU into 8/16-pin sockets
+- **Risers** fail (cheap ones more often); **SATA-powered risers can start fires**
+- **Boot drives** (USB flash, SATA SSD, M.2 NVMe) and a **mining OS**: free Linux, or Windows with a licence, overhead, an 8-GPU limit and overclock tools
+- **Thermal pads and copper shims:** GDDR6X cards memory-throttle until re-padded
+- **Dust** that eats cooling, intake filters, **hot/cold aisle containment**, **evaporative coolers** that struggle on humid days, ASICs that get less efficient when hot
+- South Africa: optional **daytime surplus tariff** (cheap 06:00–18:00, pricier at night)
+
 ## 🔜 v0.2: Builders & Workshop
 - **Thermal work:** repaste, new thermal pads, copper shims and plates: lower temps, less wear, more hashrate
 - **Workshop tools:** screwdriver kit, multimeter, thermal camera, reflow station, BIOS programmer. Better tools unlock better repairs

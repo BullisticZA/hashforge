@@ -2,7 +2,7 @@
 
 import {
   ALGOS, GPU_ALGOS, GPUS, ASICS, PSUS, FRAMES, COOLING, RACKS, INVERTERS, BATTERIES, SOLAR, GENERATORS,
-  LOCATIONS, REGIONS, byId,
+  LOCATIONS, REGIONS, RISERS, BOOT, MODS, OS, FACILITY, byId,
 } from '../data/catalog.js';
 import { QUALITY, JUNK_LOTS, UPGRADES, upgradeCost, forkThreshold, forkReward, CRAFT_FEE, PART_TYPES } from '../data/progression.js';
 import * as E from '../sim/engine.js';
@@ -20,6 +20,7 @@ const NAV = [
 ];
 const SHOP_TABS = [
   ['gpu', 'GPUs', GPUS], ['asic', 'ASIC miners', ASICS], ['frame', 'Rig kits', FRAMES], ['psu', 'Power supplies', PSUS],
+  ['parts', 'Risers, boot & thermal', [...RISERS, ...BOOT, ...MODS]],
   ['rack', 'Racks', RACKS], ['cooling', 'Cooling & AC', COOLING], ['energy', 'Solar & backup', [...INVERTERS, ...BATTERIES, ...SOLAR, ...GENERATORS]],
   ['location', 'Locations', []],
 ];
@@ -193,6 +194,17 @@ export class App {
         }
         break;
       }
+      case 'install-boot': if (this.result(E.installBoot(s, a.arg, a.uid), 'Boot drive installed')) this.refreshOverlay(); break;
+      case 'swap-riser': {
+        const [rigUid, slot] = a.arg.split(':');
+        if (this.result(E.swapRiser(s, rigUid, +slot, a.uid), 'Riser swapped')) this.refreshOverlay();
+        break;
+      }
+      case 'os': if (this.result(E.setOs(s, a.uid, a.value))) this.refreshOverlay(); break;
+      case 'mod': if (this.result(E.applyMod(s, a.uid, a.arg), 'Mod applied')) this.refreshOverlay(); break;
+      case 'clean': { const r = E.cleanDust(s); this.result(r, r.ok ? `Cleaned for ${m(r.cost)}` : ''); break; }
+      case 'facility': this.result(E.buyFacility(s, a.id), 'Installed'); break;
+      case 'tariff-plan': this.result(E.setTariffPlan(s, a.value)); break;
       case 'reset-breaker': this.result(E.resetBreaker(s), 'Breaker reset'); break;
       case 'grid-charge': s.energy.gridCharge = !s.energy.gridCharge; this.render(true); break;
       case 'tariff': this.result(E.setTariff(s, parseFloat(a.value)), 'Tariff updated'); break;
@@ -353,7 +365,7 @@ export class App {
     return `<div class="grid">
       <div class="card"><h3>Hashrate</h3>${algos.length ? algos.map(([a, h]) => `<div class="spread"><span>${ALGOS[a].name}</span><b class="mono">${hashrate(h, ALGOS[a].unit)}</b></div>`).join('') : '<div class="muted">Nothing mining yet.</div>'}</div>
       <div class="card"><h3>Today</h3><div class="kv"><span>Mining</span><span class="good">${m(r.grossPerDay)}/day</span><span>Power</span><span class="bad">${m(r.demandWatts / 1000 * 24 * r.tariff)}/day</span><span>Net worth</span><span>${m(E.netWorth(this.state))}</span></div></div>
-      <div class="card"><h3>Room</h3><div class="kv"><span>Room temp</span><span>${r.roomTemp.toFixed(1)} °C</span><span>Cooling</span><span>${kw(r.coolingCapacity)} of ${kw(r.minerWatts)} heat</span><span>Circuit</span><span class="${r.circuitPct > 0.9 ? 'bad' : ''}">${Math.round(r.circuitPct * 100)}%</span><span>Throttle</span><span class="${r.throttle < 1 ? 'warn' : ''}">${Math.round(r.throttle * 100)}%</span></div></div>
+      <div class="card"><h3>Room</h3><div class="kv"><span>Dust</span><span class="${r.dust > 0.4 ? 'warn' : ''}">${Math.round(r.dust * 100)}% <button class="btn" style="padding:2px 8px" data-action="clean">Clean ${m(E.cleanCost(this.state))}</button></span><span>Room temp</span><span>${r.roomTemp.toFixed(1)} °C</span><span>Cooling</span><span>${kw(r.coolingCapacity)} of ${kw(r.minerWatts)} heat</span><span>Circuit</span><span class="${r.circuitPct > 0.9 ? 'bad' : ''}">${Math.round(r.circuitPct * 100)}%</span><span>Throttle</span><span class="${r.throttle < 1 ? 'warn' : ''}">${Math.round(r.throttle * 100)}%</span></div></div>
     </div>`;
   }
 
@@ -366,10 +378,29 @@ export class App {
     return `<button class="btn" data-action="repair" data-uid="${o.uid}">${o.broken ? 'Repair' : 'Service'} ${this.money(E.repairCost(this.state, o))}</button>`;
   }
 
+  modButtons(gpu) {
+    if (byId[gpu.id].kind !== 'gpu') return '';
+    const kits = this.state.inventory.filter((x) => byId[x.id].kind === 'mod');
+    const mods = gpu.mods || {};
+    const btns = [];
+    for (const id of ['pads', 'shim']) {
+      if (mods[id]) continue;
+      const kit = kits.find((k) => k.id === id);
+      if (kit && (!byId[id].needs || mods[byId[id].needs])) btns.push(`<button class="btn" data-action="mod" data-uid="${gpu.uid}" data-arg="${kit.uid}">${id === 'pads' ? '🧊 Re-pad' : '🟧 Copper shims'}</button>`);
+    }
+    return btns.join('');
+  }
+
+  modTags(gpu) {
+    const m = gpu.mods || {};
+    return `${m.pads ? '<span class="tag">Fresh pads</span>' : ''}${m.shim ? '<span class="tag">Copper shims</span>' : ''}${byId[gpu.id].mem === 'GDDR6X' && !m.pads ? '<span class="tag warn">Memory throttling</span>' : ''}`;
+  }
+
   ownedCard(o, actions = '') {
     const spec = byId[o.id];
     return `<div class="card product"><div class="spread"><span class="name">${esc(spec.name)}</span>${this.gradeTag(o.q)}</div>
       <div class="small muted">Condition ${Math.round((o.cond ?? 1) * 100)}%${o.broken ? ' · <span class="bad">FAILED</span>' : ''}${o.crafted ? ' · hand-built' : ''}</div>
+      ${spec.kind === 'gpu' ? `<div class="row">${this.modTags(o)}</div>` : ''}
       <div class="bar"><i style="width:${Math.round((o.cond ?? 1) * 100)}%"></i></div>${actions}</div>`;
   }
 
@@ -398,6 +429,9 @@ export class App {
       battery: () => [['Capacity', `${item.kwh} kWh`], ['Max output', `${item.maxKw} kW`], ['Cycle life', `${item.cycles.toLocaleString()} cycles`]],
       solar: () => [['Peak output', `${item.kwp} kWp`], ['Note', 'Needs an inverter']],
       generator: () => [['Output', `${item.kw} kW`], ['Diesel', `${item.litresPerKwh} L/kWh`]],
+      riser: () => [['Power input', item.power], ['Reliability', item.reliability <= 0.5 ? 'Excellent' : item.reliability <= 1 ? 'Average' : 'Poor'], ...(item.fireRisk ? [['⚠ Warning', 'SATA connectors are rated below what a card can pull: fire risk']] : [])],
+      boot: () => [['Capacity', `${item.gb} GB`], ['Reliability', item.reliability <= 0.5 ? 'Excellent' : item.reliability <= 1 ? 'Good' : 'Fair (flash wears out)']],
+      mod: () => [['Effect', item.desc]],
     }[item.kind];
     return lines ? `<div class="kv">${lines().map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('')}</div>` : '';
   }
@@ -407,7 +441,10 @@ export class App {
     const tabs = `<div class="tabs">${SHOP_TABS.map(([id, label]) => `<button class="${id === this.shopTab ? 'on' : ''}" data-action="shop-tab" data-id="${id}">${label}</button>`).join('')}</div>`;
     if (this.shopTab === 'location') {
       const cur = LOCATIONS.indexOf(E.location(s));
-      return `<div class="page-head"><h1>Vendors</h1>${tabs}</div><div class="grid">${LOCATIONS.map((l, i) => `
+      const fac = s.facility?.[s.location] || {};
+      const facHtml = `<h3 style="margin:18px 0 8px">Facility upgrades: ${esc(E.location(s).name)}</h3><div class="grid">${FACILITY.map((f) => `<div class="card product"><span class="name">${esc(f.name)}</span><div class="small muted">${esc(f.desc)}</div>
+        <div class="spread"><span class="price">${m(E.facilityPrice(s, f.id))}</span>${fac[f.id] ? '<span class="tag">Installed</span>' : `<button class="btn primary" data-action="facility" data-id="${f.id}">Install</button>`}</div></div>`).join('')}</div>`;
+      return `<div class="page-head"><h1>Vendors</h1>${tabs}</div>${facHtml}<h3 style="margin:18px 0 8px">Locations</h3><div class="grid">${LOCATIONS.map((l, i) => `
         <div class="card product"><span class="name">${esc(l.name)}</span>
         <div class="kv"><span>Rigs / racks</span><span>${l.rigSlots} / ${l.rackSlots}</span><span>Circuit</span><span>${l.circuitKw} kW</span><span>Power price</span><span>${l.tariffMult === 1 ? 'Home tariff' : `${Math.round((1 - l.tariffMult) * 100)}% cheaper`}</span><span>Roof for solar</span><span>${l.roofKwp} kWp</span><span>Ambient</span><span>${l.ambient} °C</span></div>
         <div class="price">${l.price ? m(l.price * E.effects(s).price) : 'Free'}</div>
@@ -481,7 +518,7 @@ export class App {
         return this.ownedCard(o, `<div class="row">
           <button class="btn" data-action="inspect" data-id="${o.id}" data-uid="${o.uid}">3D</button>
           ${this.repairBtn(o)}
-          ${spec.kind === 'gpu' ? `<button class="btn" data-action="salvage" data-uid="${o.uid}">Salvage</button>` : ''}
+          ${spec.kind === 'gpu' ? `${this.modButtons(o)}<button class="btn" data-action="salvage" data-uid="${o.uid}">Salvage</button>` : ''}
           <button class="btn danger" data-action="sell" data-uid="${o.uid}">Sell ${this.money(E.sellValue(s, o))}</button></div>`);
       }).join('') || '<div class="muted">Nothing in storage.</div>'}</div>`;
   }
@@ -499,7 +536,8 @@ export class App {
         <div class="card"><h3>Grid</h3><div class="kv">
           <span>Status</span><span class="${r.offline ? 'bad' : 'good'}">${r.offline ? `Down: ${esc(r.offlineReason)}` : 'Supplying'}</span>
           ${reg.loadShedding ? `<span>Load-shedding</span><span class="${s.grid.stage ? 'warn' : 'good'}">${s.grid.stage ? `Stage ${s.grid.stage}: ${E.SHED_BLOCKS[s.grid.stage] * 2} h/day` : 'Suspended'}</span>` : ''}
-          <span>Circuit</span><span class="${r.circuitPct > 0.9 ? 'bad' : ''}">${kw(r.demandWatts)} of ${r.location.circuitKw} kW</span></div>
+          <span>Circuit</span><span class="${r.circuitPct > 0.9 ? 'bad' : ''}">${kw(r.demandWatts)} of ${r.location.circuitKw} kW</span>
+          ${s.region === 'za' ? `<span>Tariff plan</span><span><select data-change="tariff-plan"><option value="standard" ${s.tariffPlan !== 'daytime' ? 'selected' : ''}>Standard</option><option value="daytime" ${s.tariffPlan === 'daytime' ? 'selected' : ''}>Daytime surplus (cheap 06-18h)</option></select></span>` : ''}</div>
           ${reg.loadShedding ? `<div class="small muted" style="margin:8px 0 4px">Next 24 hours</div><div class="shed">${sched.map((off, i) => `<i class="${off ? 'off' : ''} ${i === 0 ? 'now' : ''}" title="${(hour + i) % 24}:00"></i>`).join('')}</div>` : ''}</div>
         <div class="card"><h3>Backup & solar</h3><div class="kv">
           <span>Inverter</span><span class="${cap.inverterKw && cap.inverterKw < r.demandWatts / 1000 ? 'bad' : ''}">${cap.inverterKw ? `${cap.inverterKw} kW` : 'None'}</span>
@@ -665,10 +703,14 @@ export class App {
     if (!rig) { this.closeOverlay(); return; }
     const v = await this.ensureViewer();
     const { makeRig } = await import('../render/models.js');
-    const key = JSON.stringify([rig.gpus.map((g) => g.uid + g.broken), rig.psus.map((p) => p.uid)]);
+    const key = JSON.stringify([rig.gpus.map((g) => g.uid + g.broken), rig.psus.map((p) => p.uid), (rig.risers || []).map((r) => r.uid + r.broken), rig.boot?.uid]);
     if (rebuild || key !== this.rigKey) {
       this.rigKey = key;
-      const model = makeRig(byId[rig.frameId], rig.gpus.map((g) => ({ spec: byId[g.id], q: g.q, broken: g.broken })), rig.psus.map((p) => ({ spec: byId[p.id], q: p.q })), { detail: 'full' });
+      const model = makeRig(byId[rig.frameId], rig.gpus.map((g) => ({ spec: byId[g.id], q: g.q, broken: g.broken })), rig.psus.map((p) => ({ spec: byId[p.id], q: p.q })), {
+        detail: 'full',
+        risers: (rig.risers || []).map((r) => ({ spec: byId[r.id], broken: r.broken })),
+        boot: rig.boot ? { spec: byId[rig.boot.id] } : null,
+      });
       v.renderer.domElement.style.display = '';
       v.replaceModel(model);
       $('#stage3d').querySelector('.stage-ctrl')?.remove();
@@ -684,12 +726,24 @@ export class App {
         <span>PSU load</span><span class="${st.psuLoadPct > 1 ? 'bad' : st.psuLoadPct > 0.85 ? 'warn' : ''}">${Math.round(st.dcLoad)} / ${st.psuCapacity} W</span>
         <span>Hashrate</span><span>${hashrate(st.potentialHashrate, st.unit)} ${ALGOS[st.algo].name}</span><span>Earns</span><span>${m(st.grossPerDay)}/day</span></div>
       <div class="row"><button class="btn primary" data-action="autofill" data-uid="${rig.uid}">⚡ Auto-fill from inventory</button><button class="btn" data-action="toggle" data-uid="${rig.uid}">${rig.on ? 'Switch off' : 'Switch on'}</button></div>
+      <h3>Boot drive & OS</h3>
+      ${rig.boot ? line(rig.boot) : '<div class="tip critical">No boot drive: this rig cannot load an OS.</div>'}
+      ${s.inventory.filter((o) => byId[o.id].kind === 'boot' && !o.broken).map((o) => line(o, `<button class="btn primary" data-action="install-boot" data-arg="${rig.uid}" data-uid="${o.uid}">${rig.boot ? 'Swap in' : 'Install'}</button>`)).join('')}
+      ${!rig.boot && !s.inventory.some((o) => byId[o.id].kind === 'boot') ? '<div class="muted small">Buy a USB flash drive or SSD under Vendors → Risers, boot & thermal.</div>' : ''}
+      <select data-change="os" data-uid="${rig.uid}">${Object.entries(OS).map(([id, o]) => `<option value="${id}" ${(rig.os || 'linux') === id ? 'selected' : ''}>${o.name}${o.licence && !rig.windowsLicensed ? ` (licence ${m(o.licence)})` : ''}</option>`).join('')}</select>
+      <div class="small muted">${OS[rig.os || 'linux'].desc}</div>
       <h3>Power supplies (${rig.psus.length}/${frame.psuSlots})</h3>
       ${rig.psus.map((p) => line(p, `${this.repairBtn(p)}<button class="btn" data-action="uninstall" data-arg="${rig.uid}" data-uid="${p.uid}">Remove</button>`)).join('')}
       ${rig.psus.length < frame.psuSlots ? sparePsus.map((p) => line(p, `<button class="btn primary" data-action="install" data-arg="${rig.uid}" data-uid="${p.uid}">Install</button>`)).join('') || '<div class="muted small">No spare PSUs. Buy one from Vendors or the Used market.</div>' : ''}
       <h3>GPUs (${rig.gpus.length}/${frame.slots})</h3>
-      ${rig.gpus.map((g) => line(g, `${this.repairBtn(g)}<button class="btn" data-action="uninstall" data-arg="${rig.uid}" data-uid="${g.uid}">Remove</button>`)).join('')}
+      ${rig.gpus.map((g, i) => line(g, `${this.modTags(g)}${this.modButtons(g)}${this.repairBtn(g)}<button class="btn" data-action="uninstall" data-arg="${rig.uid}" data-uid="${g.uid}">Remove</button>${rig.risers?.[i]?.broken ? '<span class="bad small">riser dead</span>' : ''}`)).join('')}
       ${rig.gpus.length < frame.slots ? spareGpus.map((g) => line(g, `<button class="btn primary" data-action="install" data-arg="${rig.uid}" data-uid="${g.uid}">Install</button>`)).join('') || '<div class="muted small">No spare GPUs in inventory.</div>' : ''}
+      <h3>PCIe risers</h3>
+      ${(rig.risers || []).map((r, i) => {
+        const spare = s.inventory.filter((o) => byId[o.id].kind === 'riser');
+        return `<div class="card" style="padding:8px"><div class="spread"><span class="small">Slot ${i + 1}: ${esc(byId[r.id].name)}</span>${r.broken ? '<span class="bad small">DEAD</span>' : byId[r.id].fireRisk ? '<span class="warn small">⚠ SATA</span>' : '<span class="good small">OK</span>'}</div>
+          ${spare.length ? `<div class="row" style="margin-top:6px">${spare.slice(0, 3).map((o) => `<button class="btn" data-action="swap-riser" data-arg="${rig.uid}:${i}" data-uid="${o.uid}">Swap: ${esc(byId[o.id].name.replace('PCIe Riser ', ''))}</button>`).join('')}</div>` : ''}</div>`;
+      }).join('')}
       ${!rig.gpus.length && !rig.psus.length ? `<button class="btn danger" data-action="sell" data-uid="${rig.uid}">Sell rig kit</button>` : ''}`;
   }
 

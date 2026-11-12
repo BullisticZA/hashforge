@@ -164,7 +164,7 @@ export class MiningRoom {
   sync(state, room, loc) {
     const key = JSON.stringify([
       loc.id,
-      state.rigs.map((r) => [r.uid, r.frameId, r.gpus.map((g) => g.id + g.q + g.broken), r.psus.map((p) => p.id)]),
+      state.rigs.map((r) => [r.uid, r.frameId, r.gpus.map((g) => g.id + g.q + g.broken), r.psus.map((p) => p.id), (r.risers || []).map((x) => x.id + x.broken), r.boot?.id]),
       state.racks.map((r) => [r.uid, r.id, r.asics.map((a) => a.id + a.q + a.broken)]),
       state.cooling.map((c) => c.id),
       state.energy.inverters.map((i) => i.id), state.energy.batteries.map((b) => [b.id, Math.round((b.soc || 0) / byId[b.id].kwh * 5)]),
@@ -203,10 +203,14 @@ export class MiningRoom {
     let x = -loc.w / 2 + 3.5; let z = -loc.d / 2 + 3;
     state.rigs.forEach((rig) => {
       const frame = byId[rig.frameId];
-      const width = frame.slots * 0.78 + 1.2;
+      const width = frame.slots * 0.78 + 1.6;
       if (x + width > loc.w / 2 - 1) { x = -loc.w / 2 + 3.5; z += 5.5; }
       const m = makeRig(frame, rig.gpus.map((g) => ({ spec: byId[g.id], q: g.q, broken: g.broken })),
-        rig.psus.map((p) => ({ spec: byId[p.id], q: p.q })), { detail });
+        rig.psus.map((p) => ({ spec: byId[p.id], q: p.q })), {
+          detail,
+          risers: (rig.risers || []).map((r) => ({ spec: byId[r.id], broken: r.broken })),
+          boot: rig.boot ? { spec: byId[rig.boot.id] } : null,
+        });
       m.position.set(x + width / 2, 0, z);
       add(m, { type: 'rig', uid: rig.uid });
       x += width + 1.2;

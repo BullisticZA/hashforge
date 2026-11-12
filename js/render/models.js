@@ -16,6 +16,7 @@ function mat(key, make) {
 }
 const M = {
   shroud: (tint = '#1a1d24') => mat(`shroud${tint}`, () => new THREE.MeshPhysicalMaterial({ color: tint, metalness: 0.55, roughness: 0.32, clearcoat: 0.6, clearcoatRoughness: 0.25 })),
+  anodized: () => mat('anodized', () => new THREE.MeshStandardMaterial({ color: '#22262e', metalness: 0.8, roughness: 0.42 })),
   satin: () => mat('satin', () => new THREE.MeshStandardMaterial({ color: '#2a2f38', metalness: 0.7, roughness: 0.45 })),
   alu: () => mat('alu', () => new THREE.MeshStandardMaterial({ color: '#c3cad3', metalness: 0.95, roughness: 0.28 })),
   aluDark: () => mat('aluDark', () => new THREE.MeshStandardMaterial({ color: '#6c7480', metalness: 0.9, roughness: 0.35 })),
@@ -250,9 +251,17 @@ export function makeGPU(spec, { q = 'new', detail = 'full', broken = false } = {
   }
   layers.pcb.add(bracket);
   const connectors = spec.tdp > 400 ? [['16pin', 0.32]] : spec.tdp > 220 ? [['8pin', 0.22], ['8pin', 0.22]] : spec.tdp > 150 ? [['8pin', 0.22]] : [['6pin', 0.17]];
-  connectors.forEach(([, w], i) => {
-    const c = box(w, 0.11, 0.1, M.black(), L * 0.3 - i * 0.27, H / 2 + 0.05, -T / 2 + 0.12);
+  const sockets = [];
+  connectors.forEach(([type, w], i) => {
+    const x = L * 0.3 - i * 0.27;
+    const c = box(w, 0.11, 0.1, M.black(), x, H / 2 + 0.05, -T / 2 + 0.12);
     layers.pcb.add(c);
+    // pin holes on top of the socket
+    const pins = [];
+    const n = type === '16pin' ? 8 : type === '8pin' ? 4 : 3;
+    for (let k = 0; k < n; k++) for (let j = 0; j < 2; j++) pins.push([x - w / 2 + 0.03 + k * (w - 0.06) / Math.max(1, n - 1), H / 2 + 0.106, -T / 2 + 0.095 + j * 0.05]);
+    layers.pcb.add(instancedBoxes(0.018, 0.005, 0.018, M.gold(), pins));
+    sockets.push({ pos: new THREE.Vector3(x, H / 2 + 0.11, -T / 2 + 0.12), type, wires: type === '16pin' ? 2 : 1 });
   });
 
   if (broken) {
@@ -263,7 +272,8 @@ export function makeGPU(spec, { q = 'new', detail = 'full', broken = false } = {
 
   // Exploded view offsets (along Z, front to back)
   root.userData = {
-    kind: 'gpu', spinners, leds, layers, size: [L, H, T],
+    kind: 'gpu', spinners, leds, layers, size: [L, H, T], sockets,
+    fingers: new THREE.Vector3(-L / 2 + 0.6 + 20 * 0.022, -H / 2 - 0.11, -T / 2 + 0.06),
     explode: { backplate: -0.9, pcb: -0.45, heatsink: 0, shroud: 0.55, fans: 1.0 },
   };
   return root;
@@ -369,6 +379,7 @@ export function makePSU(spec, { q = 'new' } = {}) {
     const sockets = [];
     for (let i = 0; i < 6; i++) for (let j = 0; j < 2; j++) sockets.push([-0.55 + i * 0.22, -0.15 + j * 0.22, d / 2 + 0.01]);
     g.add(instancedBoxes(0.16, 0.12, 0.03, M.satin(), sockets));
+    g.userData.sockets = sockets.map(([x, y, z]) => new THREE.Vector3(x, y, z + 0.02));
     // Efficiency badge and wattage label
     const badge = box(0.28, 0.28, 0.02, M.glow(RATING_COLOR[spec.rating]), w / 2 - 0.25, h / 2 - 0.2, -d / 2 - 0.01);
     g.add(badge); leds.push(badge);
@@ -378,55 +389,221 @@ export function makePSU(spec, { q = 'new' } = {}) {
     g.add(tag);
     g.add(box(0.12, 0.2, 0.04, M.satin(), -w / 2 + 0.2, 0.1, -d / 2 - 0.02));   // power switch
   }
-  g.userData = { kind: 'psu', spinners, leds, size: [1.5, 0.9, 2] };
+  g.userData = { ...g.userData, kind: 'psu', spinners, leds, size: [1.5, 0.9, 2] };
+  if (!g.userData.sockets) g.userData.sockets = [new THREE.Vector3(0, -0.1, 1.15), new THREE.Vector3(0.2, -0.1, 1.15), new THREE.Vector3(-0.2, -0.1, 1.15)];
+  return g;
+}
+
+// ------------------------------------------------------------------ cables, risers, boot media
+
+/** A sleeved cable following a smooth path through the given points. */
+function cable(points, radius = 0.028, material = M.black(), segments = 24) {
+  const curve = new THREE.CatmullRomCurve3(points.map((p) => p.clone()), false, 'centripetal');
+  const m = new THREE.Mesh(new THREE.TubeGeometry(curve, segments, radius, 8), material);
+  m.castShadow = true;
+  return m;
+}
+
+/** PCIe riser board: x16 slot the card plugs into, capacitors, power input and a status LED. */
+export function makeRiser(spec = { power: '6-pin', fireRisk: 0, id: 'riser009s' }, { broken = false } = {}) {
+  const g = new THREE.Group();
+  const premium = spec.id === 'riser011pro';
+  g.add(box(0.36, 0.035, 0.95, premium ? M.pcb() : M.pcbGreen(), 0, 0, 0));
+  g.add(box(0.12, 0.09, 0.9, M.black(), 0.05, 0.06, 0));                         // x16 slot
+  const caps = [];
+  for (let i = 0; i < 4; i++) caps.push([-0.12, 0.06, -0.32 + i * 0.12]);
+  const capMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.03, 0.03, 0.09, 10), M.aluDark(), 4);
+  const m4 = new THREE.Matrix4();
+  caps.forEach(([x, y, z], i) => capMesh.setMatrixAt(i, m4.makeTranslation(x, y, z)));
+  g.add(capMesh);
+  // Power input: 6-pin (black) or SATA (with the warning-red housing)
+  const sata = spec.power === 'SATA';
+  g.add(box(sata ? 0.05 : 0.11, 0.08, sata ? 0.2 : 0.12, sata ? M.plastic('#c2410c') : M.black(), -0.1, 0.06, 0.4));
+  g.add(box(0.08, 0.05, 0.12, M.plastic('#e5e7eb'), -0.1, 0.045, -0.4));         // USB 3.0 port
+  const led = box(0.03, 0.02, 0.03, M.glow(broken ? '#ff3b3b' : '#38bdf8'), 0.14, 0.03, 0.42);
+  g.add(led);
+  if (broken) g.add(box(0.2, 0.01, 0.2, M.rust(), -0.08, 0.025, 0.36));          // scorch mark
+  g.userData = {
+    kind: 'riser', spinners: [], leds: [led],
+    usbPort: new THREE.Vector3(-0.1, 0.05, -0.47),
+    powerPort: new THREE.Vector3(-0.1, 0.1, 0.48),
+    slotTop: 0.105, sata,
+  };
+  return g;
+}
+
+export function makeBoot(spec) {
+  const g = new THREE.Group();
+  if (spec.style === 'usb') {
+    g.add(box(0.22, 0.07, 0.62, M.plastic('#1f2937'), 0, 0, 0, 0.02));
+    g.add(box(0.15, 0.05, 0.16, M.alu(), 0, 0, 0.38));
+    const led = box(0.04, 0.02, 0.04, M.glow('#22c55e'), 0, 0.04, -0.2);
+    g.add(led);
+    g.userData = { kind: 'boot', spinners: [], leds: [led] };
+  } else if (spec.style === 'ssd') {
+    g.add(box(1.0, 0.07, 0.7, M.satin(), 0, 0, 0, 0.02));
+    g.add(box(0.2, 0.05, 0.08, M.black(), 0.35, 0, 0.36));
+    g.userData = { kind: 'boot', spinners: [], leds: [] };
+  } else {
+    g.add(box(0.22, 0.02, 0.8, M.pcb(), 0, 0, 0));
+    g.add(box(0.18, 0.025, 0.25, M.black(), 0, 0.015, -0.1), box(0.18, 0.025, 0.12, M.black(), 0, 0.015, 0.2));
+    g.add(box(0.2, 0.02, 0.06, M.gold(), 0, 0, 0.41));
+    g.userData = { kind: 'boot', spinners: [], leds: [] };
+  }
+  return g;
+}
+
+export function makeModKit(spec) {
+  const g = new THREE.Group();
+  if (spec.id === 'pads') {
+    g.add(box(0.9, 0.04, 0.5, M.plastic('#60a5fa'), 0, 0, 0), box(0.9, 0.04, 0.5, M.plastic('#93c5fd'), 0.1, 0.05, 0.15));
+  } else {
+    for (let i = 0; i < 8; i++) g.add(box(0.14, 0.03, 0.12, M.copper(), (i % 4) * 0.2 - 0.3, 0, Math.floor(i / 4) * 0.18));
+  }
+  g.userData = { kind: 'mod', spinners: [], leds: [] };
+  return g;
+}
+
+/** Motherboard on the lower shelf: x1 slots for every riser, RAM, CPU cooler and a 24-pin socket. */
+function makeMotherboard(slots) {
+  const g = new THREE.Group();
+  const W = 2.6; const D = 2.2;
+  g.add(box(W, 0.04, D, M.pcb(), 0, 0, 0));
+  const slotPos = [];
+  for (let i = 0; i < slots; i++) {
+    const z = -D / 2 + 0.25 + (i % 6) * ((D - 0.5) / 5);
+    const x = -W / 2 + 0.35 + Math.floor(i / 6) * 0.45;
+    g.add(box(0.06, 0.06, 0.3, M.black(), x, 0.05, z));
+    slotPos.push(new THREE.Vector3(x, 0.09, z));
+  }
+  g.add(box(0.5, 0.08, 0.5, M.aluDark(), W * 0.18, 0.06, -0.25));                // CPU socket area
+  const fan = makeFan(0.22, '#9fb4d8', { blades: 7, frame: 'none', ledRing: false });
+  fan.rotation.x = -Math.PI / 2;
+  fan.position.set(W * 0.18, 0.32, -0.25);
+  g.add(box(0.5, 0.2, 0.5, M.alu(), W * 0.18, 0.18, -0.25), fan);
+  g.add(box(0.06, 0.12, 0.7, M.black(), W * 0.42, 0.08, -0.25), box(0.06, 0.12, 0.7, M.black(), W * 0.36, 0.08, -0.25)); // DIMM slots
+  g.add(box(0.035, 0.32, 0.66, M.plastic('#1e293b'), W * 0.42, 0.2, -0.25), box(0.035, 0.32, 0.66, M.plastic('#1e293b'), W * 0.36, 0.2, -0.25)); // RAM
+  g.add(box(0.12, 0.12, 0.45, M.plastic('#f8fafc'), W / 2 - 0.08, 0.08, 0.5));    // 24-pin ATX
+  g.add(box(0.3, 0.25, 0.9, M.satin(), W / 2 - 0.15, 0.15, -D / 2 + 0.6));         // rear I/O
+  g.userData = { slotPos, atx: new THREE.Vector3(W / 2 - 0.02, 0.14, 0.5), usb: new THREE.Vector3(W / 2, 0.2, -D / 2 + 0.45), spinners: [fan.userData.spinner] };
   return g;
 }
 
 // ------------------------------------------------------------------ open-air GPU rig
 
-export function makeRig(frameSpec, gpus, psus, { detail = 'lite' } = {}) {
+/**
+ * A complete open-air rig: frame, motherboard, PSUs, a riser under every card,
+ * USB riser cables to the motherboard, riser power from the PSU, and PCIe power
+ * cables into each card's 8/16-pin sockets.
+ */
+export function makeRig(frameSpec, gpus, psus, { detail = 'lite', risers = [], boot = null } = {}) {
   const g = new THREE.Group();
   const spinners = []; const leds = [];
-  const W = frameSpec.slots * 0.78 + 1.2;
-  const D = 4.2; const Hh = 4.2;
+  const W = frameSpec.slots * 0.78 + 1.6;
+  const D = 4.2; const Hh = 4.6;
   const tube = 0.12;
-  // Aluminium extrusion frame
-  const rails = [];
-  for (const x of [-W / 2, W / 2]) for (const z of [-D / 2, D / 2]) rails.push(box(tube, Hh, tube, M.alu(), x, Hh / 2, z));
-  for (const y of [0.06, 1.6, Hh]) {
-    rails.push(box(W, tube, tube, M.alu(), 0, y, -D / 2), box(W, tube, tube, M.alu(), 0, y, D / 2));
-    rails.push(box(tube, tube, D, M.alu(), -W / 2, y, 0), box(tube, tube, D, M.alu(), W / 2, y, 0));
+  const shelfY = 1.55; const riserY = 2.75;
+  for (const x of [-W / 2, W / 2]) for (const z of [-D / 2, D / 2]) g.add(box(tube, Hh, tube, M.anodized(), x, Hh / 2, z));
+  for (const y of [0.06, shelfY, Hh]) {
+    g.add(box(W, tube, tube, M.anodized(), 0, y, -D / 2), box(W, tube, tube, M.anodized(), 0, y, D / 2));
+    g.add(box(tube, tube, D, M.anodized(), -W / 2, y, 0), box(tube, tube, D, M.anodized(), W / 2, y, 0));
   }
-  rails.push(box(W, tube, tube, M.alu(), 0, Hh - 0.5, 0.4));   // GPU support bar
-  g.add(...rails);
-  // Motherboard tray on the lower level
-  g.add(box(W * 0.5, 0.04, 2.4, M.aluDark(), W * 0.18, 1.62, -0.6));
-  g.add(box(2.4, 0.05, 2.0, M.pcb(), W * 0.18, 1.67, -0.6));
-  g.add(box(0.5, 0.25, 0.5, M.black(), W * 0.18, 1.82, -0.8));        // CPU cooler
-  const status = box(0.12, 0.06, 0.06, M.glow('#33ff88'), W * 0.18 + 0.9, 1.72, 0.3);
+  // Riser rails the cards stand on, and the top bar that braces them
+  g.add(box(W, 0.08, 0.12, M.anodized(), 0, riserY - 0.06, -0.55), box(W, 0.08, 0.12, M.anodized(), 0, riserY - 0.06, 0.45));
+  g.add(box(W, 0.08, 0.12, M.anodized(), 0, Hh - 0.35, 0.1));
+  g.add(box(W - 0.2, 0.03, D - 0.3, M.black(), 0, shelfY + 0.07, 0));            // lower shelf plate
+
+  // Motherboard on the shelf
+  const mobo = makeMotherboard(frameSpec.slots);
+  mobo.position.set(W / 2 - 1.5, shelfY + 0.12, 0.2);
+  g.add(mobo);
+  spinners.push(...mobo.userData.spinners);
+  const status = box(0.12, 0.06, 0.06, M.glow('#33ff88'), W / 2 - 0.4, shelfY + 0.2, -0.95);
   g.add(status); leds.push(status);
-  // PSUs on the lower shelf
-  psus.forEach((p, i) => {
+
+  // PSUs on the floor tier
+  const psuModels = psus.map((p, i) => {
     const m = makePSU(p.spec, { q: p.q });
-    m.position.set(-W / 2 + 1.0 + i * 1.8, 0.55, -0.4);
+    m.position.set(-W / 2 + 1.0 + i * 1.8, 0.55, -0.6);
     g.add(m);
     spinners.push(...m.userData.spinners); leds.push(...m.userData.leds);
+    return m;
   });
-  // GPUs standing vertically on top, fans facing +X
+  const psuSocket = (i, k) => {
+    const m = psuModels[i % psuModels.length];
+    if (!m) return null;
+    m.updateMatrix();
+    return m.userData.sockets[k % m.userData.sockets.length].clone().applyMatrix4(m.matrix);
+  };
+
+  // 24-pin from the first PSU to the motherboard
+  if (psuModels.length) {
+    mobo.updateMatrix();
+    const atx = mobo.userData.atx.clone().applyMatrix4(mobo.matrix);
+    const from = psuSocket(0, 11);
+    g.add(cable([from, from.clone().add(new THREE.Vector3(0, 0, 0.5)), new THREE.Vector3(atx.x + 0.4, atx.y - 0.3, atx.z + 0.6), atx], 0.07, M.black()));
+  }
+  // Boot drive plugged into the motherboard
+  if (boot) {
+    const b = makeBoot(boot.spec);
+    mobo.updateMatrix();
+    const port = mobo.userData.usb.clone().applyMatrix4(mobo.matrix);
+    if (boot.spec.style === 'usb') { b.position.copy(port).add(new THREE.Vector3(0.3, 0, 0)); b.rotation.y = Math.PI / 2; }
+    else if (boot.spec.style === 'nvme') b.position.set(mobo.position.x - 0.4, shelfY + 0.18, mobo.position.z + 0.6);
+    else b.position.set(mobo.position.x - 0.5, shelfY + 0.15, -1.4);
+    g.add(b); leds.push(...b.userData.leds);
+  }
+
   gpus.forEach((gp, i) => {
+    const x = -W / 2 + 0.8 + i * 0.78;
+    // Riser board on the rails
+    const riserSpec = risers[i]?.spec || { power: '6-pin', id: 'riser009s' };
+    const riser = makeRiser(riserSpec, { broken: risers[i]?.broken });
+    riser.position.set(x + 0.12, riserY, -0.05);
+    g.add(riser); leds.push(...riser.userData.leds);
+
+    // The card, fingers seated in the riser's x16 slot
     const m = makeGPU(gp.spec, { q: gp.q, detail, broken: gp.broken });
-    m.rotation.y = -Math.PI / 2;           // length along Z
-    m.rotation.x = 0;
-    m.position.set(-W / 2 + 0.75 + i * 0.78, Hh - 0.2 - 0.62, 0.3);
+    m.rotation.y = -Math.PI / 2;
+    const fingers = m.userData.fingers.clone();
+    m.updateMatrix();
+    const fingerOffset = fingers.clone().applyEuler(m.rotation);
+    m.position.set(riser.position.x + 0.05 - fingerOffset.x, riserY + riser.userData.slotTop - fingerOffset.y - 0.02, riser.position.z - fingerOffset.z);
     g.add(m);
     spinners.push(...m.userData.spinners); leds.push(...m.userData.leds);
-    // PCIe riser cable down to the motherboard
-    const riser = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
-      new THREE.Vector3(-W / 2 + 0.75 + i * 0.78, Hh - 1.4, 0.4),
-      new THREE.Vector3(-W / 2 + 0.75 + i * 0.78, 2.6, 0.2),
-      new THREE.Vector3(W * 0.18 - 0.8 + i * 0.15, 1.75, -0.2),
-    ]), 12, 0.025, 6), M.plastic('#2b6cff'));
-    g.add(riser);
+    m.updateMatrix(); riser.updateMatrix(); mobo.updateMatrix();
+
+    // USB 3.0 riser cable: riser -> motherboard x1 slot
+    const usbFrom = riser.userData.usbPort.clone().applyMatrix4(riser.matrix);
+    const slot = mobo.userData.slotPos[i % mobo.userData.slotPos.length].clone().applyMatrix4(mobo.matrix);
+    g.add(cable([usbFrom, usbFrom.clone().add(new THREE.Vector3(0, -0.5, -0.3)), new THREE.Vector3((usbFrom.x + slot.x) / 2, shelfY + 0.6, slot.z - 0.2), slot.clone().add(new THREE.Vector3(0, 0.15, 0)), slot],
+      0.02, M.plastic(riserSpec.power === 'SATA' ? '#1e3a8a' : '#2563eb'), 20));
+
+    // Riser power: PSU -> riser 6-pin (or SATA)
+    const pwrTo = riser.userData.powerPort.clone().applyMatrix4(riser.matrix);
+    const pwrFrom = psuSocket(i, i * 2 + 1);
+    if (pwrFrom) {
+      g.add(cable([pwrFrom, pwrFrom.clone().add(new THREE.Vector3(0, 0, 0.6)), new THREE.Vector3(pwrTo.x, shelfY + 0.4, pwrTo.z + 0.5), pwrTo.clone().add(new THREE.Vector3(0, -0.3, 0.1)), pwrTo],
+        riserSpec.power === 'SATA' ? 0.018 : 0.024, riserSpec.power === 'SATA' ? M.plastic('#facc15') : M.black(), 20));
+    }
+
+    // PCIe power: PSU -> each 8/16-pin socket on the card, routed up and over the top
+    m.userData.sockets.forEach((sock, k) => {
+      const to = sock.pos.clone().applyMatrix4(m.matrix);
+      const from = psuSocket(i, i * 2 + k);
+      if (!from) return;
+      for (let w = 0; w < sock.wires; w++) {
+        const off = (w - (sock.wires - 1) / 2) * 0.06;
+        g.add(cable([
+          from.clone().add(new THREE.Vector3(off, 0, 0)),
+          from.clone().add(new THREE.Vector3(off, 0.1, 0.7)),
+          new THREE.Vector3(to.x + off - 0.25, shelfY + 0.6, D / 2 - 0.3),
+          new THREE.Vector3(to.x + off - 0.25, Hh - 0.1, to.z + 0.1),
+          to.clone().add(new THREE.Vector3(off, 0.35, 0)),
+          to.clone().add(new THREE.Vector3(off, 0, 0)),
+        ], 0.03, M.black(), 28));
+      }
+    });
   });
   g.userData = { kind: 'rig', spinners, leds, statusLed: status, size: [W, Hh, D] };
   return g;
@@ -601,6 +778,9 @@ export function makeShowcase(spec, owned = {}) {
     case 'asic': return makeASIC(spec, { q: owned.q, broken: owned.broken, detail: 'full' });
     case 'psu': return makePSU(spec, { q: owned.q });
     case 'frame': return makeRig(spec, [], [], { detail: 'lite' });
+    case 'riser': return makeRiser(spec, { broken: owned.broken });
+    case 'boot': return makeBoot(spec);
+    case 'mod': return makeModKit(spec);
     case 'rack': return makeRack(spec, []);
     case 'cooling': return makeCooling(spec);
     case 'inverter': return makeInverter(spec);

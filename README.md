@@ -26,6 +26,8 @@ Start in a bedroom corner with a little savings and a dream. Buy a rig kit, a po
 | **3D rig workshop:** install cards and PSUs, see every riser and heatpipe | **Exploded view:** fans, shroud, fin stack, heatpipes, PCB, backplate |
 | <img src="assets/screens/junkyard.jpg" alt="Junkyard lot reveal"> | <img src="assets/screens/outage.jpg" alt="Load-shedding in 3D"> |
 | **Junkyard:** open lots, find parts, hunt golden samples | **Load-shedding:** the lights die, fans stop, the money stops |
+| <img src="assets/screens/rig-cables.jpg" alt="Risers and cabling"> | <img src="assets/screens/room.jpg" alt="3D tour"> |
+| **Risers & cabling:** every card on a riser, USB to the motherboard, PCIe power into each socket | **3D tour:** walk your whole operation |
 
 ## ✨ Features
 
@@ -33,6 +35,7 @@ Start in a bedroom corner with a little savings and a dream. Buy a rig kit, a po
 - **Six algorithms:** SHA-256, Scrypt, kHeavyHash, KawPow, Etchash, Autolykos2. Rigs auto-switch to the most profitable
 - **Vendors, a used marketplace and a junkyard**, with quality grades from Scrap to **Golden Sample**
 - **GPU crafting:** match a core, memory, PCB and cooler; salvage cards back into parts
+- **Realistic rigs:** PCIe risers (cheap SATA ones can catch fire), USB riser cables, boot drives, Linux or Windows mining OS, thermal pads and copper shims
 - **Real power engineering:** PSU load and efficiency, circuit breakers, rack PDUs, heat and throttling, AC and immersion cooling
 - **Load-shedding stages 1–8**, solar that follows the sun, seasons and clouds, hybrid inverters that trip when overloaded, batteries that wear out, diesel generators
 - **Your currency:** detects South Africa (Rand) and other regions, uses a typical tariff you can edit, and converts at live exchange rates
