@@ -27,7 +27,7 @@ export class ProductViewer {
     this.controls.enableDamping = true;
     this.controls.autoRotate = true;
     this.controls.autoRotateSpeed = 1.6;
-    const key = new THREE.DirectionalLight('#ffffff', 3.0);
+    const key = new THREE.DirectionalLight('#ffffff', 2.4);
     key.position.set(4, 8, 6); key.castShadow = true;
     const rim = new THREE.DirectionalLight('#5ee7ff', 1.4);
     rim.position.set(-6, 3, -6);
@@ -41,7 +41,7 @@ export class ProductViewer {
     this.scene.add(floor);
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 0.32, 0.35, 0.92));
+    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 0.28, 0.35, 0.97));
     this.composer.addPass(new OutputPass());
     this.explodeTarget = 0; this.explodeNow = 0;
     this.clock = new THREE.Clock();
@@ -89,10 +89,29 @@ export class ProductViewer {
     this.inner = pivot.children[0];
     this.floor.position.y = -0.01;
     const radius = Math.max(size.x, size.y, size.z);
-    this.camera.position.set(radius * 0.55, radius * 0.45, radius * 0.95);
+    this.camera.position.set(radius * 0.75, radius * 0.6, radius * 1.25);
     this.controls.target.set(0, size.y / 2, 0);
     this.explodeTarget = 0; this.explodeNow = 0;
     this.canExplode = !!this.inner.userData.explode;
+  }
+
+  /** Swap in a custom model (e.g. a fully built rig) and frame the camera around it. */
+  replaceModel(object) {
+    if (this.pivot) this.scene.remove(this.pivot);
+    const box = new THREE.Box3().setFromObject(object);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    object.position.sub(center);
+    object.position.y += size.y / 2;
+    this.pivot = new THREE.Group();
+    this.pivot.add(object);
+    this.scene.add(this.pivot);
+    this.inner = object;
+    this.model = this.pivot;
+    const radius = Math.max(size.x, size.y, size.z);
+    this.camera.position.set(radius * 0.8, radius * 0.7, radius * 1.25);
+    this.controls.target.set(0, size.y * 0.45, 0);
+    this.canExplode = false;
   }
 
   setExploded(on) { this.explodeTarget = on ? 1 : 0; }

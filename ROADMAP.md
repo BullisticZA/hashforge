@@ -3,7 +3,7 @@
 HashForge is built in playable steps. Every update adds a major system and keeps the balance tested:
 a sensible start should *usually* make money in the first game-year, but never guaranteed.
 
-## ✅ v0.1: Foundations
+## ✅ v0.1: Foundations (playable now)
 - **2D management view** (floor plan, dashboards) with **3D hands-on views** for building, inspecting and swapping parts
 - Procedural 3D hardware with spinning fans, bloom lighting and exploded GPU views
 - 35+ GPUs and 19 ASIC miners with real model names and approximate hash rates per algorithm

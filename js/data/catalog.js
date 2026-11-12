@@ -113,9 +113,11 @@ export const FRAMES = [
 export const COOLING = [
   { id: 'boxfan', name: 'Box Fan', cooling: 1500, power: 50, price: 40, kind: 'cooling', style: 'fan' },
   { id: 'exhaust', name: 'Window Exhaust Fan', cooling: 3000, power: 120, price: 180, kind: 'cooling', style: 'fan' },
+  { id: 'windowac', name: 'Window Air Conditioner', cooling: 2500, power: 850, price: 320, kind: 'cooling', style: 'ac' },
   { id: 'portac', name: 'Portable Air Conditioner', cooling: 3500, power: 1100, price: 450, kind: 'cooling', style: 'ac' },
   { id: 'splitac', name: 'Split-Unit Air Conditioner', cooling: 7000, power: 2000, price: 1200, kind: 'cooling', style: 'ac' },
   { id: 'industrial', name: 'Industrial Exhaust Wall', cooling: 15000, power: 900, price: 2600, kind: 'cooling', style: 'wall' },
+  { id: 'crac', name: 'Precision CRAC Unit (Data Centre AC)', cooling: 45000, power: 9000, price: 22000, kind: 'cooling', style: 'crac' },
   { id: 'immersion', name: 'Immersion Cooling Tank', cooling: 30000, power: 1500, price: 9000, kind: 'cooling', style: 'tank' },
 ];
 

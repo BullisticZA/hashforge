@@ -499,6 +499,19 @@ export function makeCooling(spec) {
       g.add(fan); spinners.push(fan.userData.spinner);
       const gr = grille(0.88); gr.position.set(-2 + i * 2, 2.5, 0.28); g.add(gr);
     }
+  } else if (spec.style === 'crac') {
+    g.add(box(2.4, 5.2, 1.6, M.plastic('#dfe3e8'), 0, 2.6, 0, 0.08));
+    const louvres = [];
+    for (let i = 0; i < 14; i++) louvres.push([0, 1.0 + i * 0.25, 0.81]);
+    g.add(instancedBoxes(2.0, 0.06, 0.03, M.plastic('#aab2bc'), louvres));
+    const panel = box(0.7, 0.4, 0.02, M.glow('#5ee7ff'), 0, 4.7, 0.81);
+    g.add(panel); leds.push(panel);
+    for (let i = 0; i < 2; i++) {
+      const fan = makeFan(0.5, '#9fb4d8', { frame: 'none', ledRing: false, blades: 7 });
+      fan.rotation.x = -Math.PI / 2;
+      fan.position.set(-0.5 + i * 1.0, 5.22, 0);
+      g.add(fan); spinners.push(fan.userData.spinner);
+    }
   } else if (spec.style === 'tank') {
     g.add(box(4.5, 2.2, 2.2, M.satin(), 0, 1.1, 0, 0.06));
     const liquid = box(4.2, 1.6, 1.9, M.liquid(), 0, 1.35, 0);

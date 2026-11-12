@@ -725,7 +725,7 @@ export function sell(state, itemUid) {
   found.list.splice(found.index, 1);
   const value = sellValue(state, found.owned);
   state.cash += value;
-  addLog(state, 'sell', `Sold ${byId[found.owned.id].name} for ${value}.`);
+  addLog(state, 'sell', `Sold ${byId[found.owned.id].name} for {{usd:${value}}}.`);
   return { ok: true, value };
 }
 
@@ -785,7 +785,7 @@ export function canFork(state) {
 }
 
 export function hardFork(state) {
-  if (!canFork(state)) return fail(`Reach a net worth of ${forkThreshold(state.prestige.forks).toLocaleString()} USD first.`);
+  if (!canFork(state)) return fail(`Reach a net worth of {{usd:${forkThreshold(state.prestige.forks)}}} first.`);
   const worth = netWorth(state);
   const reward = forkReward(worth, state.prestige.forks);
   const prestige = {
@@ -921,13 +921,13 @@ function payBill(state) {
   const amount = Math.round((p.gridCost + p.dieselCost) * 100) / 100;
   state.cash -= amount;
   state.stats.powerPaid += amount;
-  addLog(state, 'bill', `Power bill: ${Math.round(p.gridKwh).toLocaleString()} kWh from the grid${p.dieselCost ? ' plus diesel' : ''}. Paid ${amount.toFixed(2)} USD.`);
+  addLog(state, 'bill', `Power bill: ${Math.round(p.gridKwh).toLocaleString()} kWh from the grid${p.dieselCost ? ' plus diesel' : ''}. Paid {{usd:${amount.toFixed(2)}}}.`);
   state.lastBill = { day: state.day, kwh: p.gridKwh, gridCost: p.gridCost, diesel: p.dieselCost, total: amount };
   p.gridKwh = 0; p.gridCost = 0; p.dieselCost = 0; p.lastBillDay = state.day;
   if (state.cash < 0) {
     const interest = Math.round(-state.cash * 0.02);
     state.cash -= interest;
-    addLog(state, 'warning', `Overdrawn: ${interest} USD interest charged. Sell hardware or cut power use.`);
+    addLog(state, 'warning', `Overdrawn: {{usd:${interest}}} interest charged. Sell hardware or cut power use.`);
   }
   if (state.cash < -10000) {
     state.gameOver = true;
@@ -958,7 +958,10 @@ export function advance(state, hours) {
     const wasOffline = state.grid.offline;
     state.grid.offline = state.grid.breakerTripped || !flow.supplied;
     state.grid.offlineReason = state.grid.breakerTripped ? 'Breaker tripped' : flow.reason;
-    if (state.grid.offline && !wasOffline && !state.grid.breakerTripped && demandKw > 0) addLog(state, 'warning', `Miners down: ${flow.reason}.`);
+    if (state.grid.offline && !wasOffline && !state.grid.breakerTripped && demandKw > 0 && state.lastOutageLogDay !== Math.floor(state.day)) {
+      state.lastOutageLogDay = Math.floor(state.day);   // one entry per day keeps the log readable
+      addLog(state, 'outage', `Miners down: ${flow.reason}.`);
+    }
 
     const online = !state.grid.offline;
     const gross = online ? room.grossPerDay / DAY_HOURS : 0;
