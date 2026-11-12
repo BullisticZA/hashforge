@@ -31,12 +31,15 @@ Start in a bedroom corner with a little savings and a dream. Buy a rig kit, a po
 
 ## ✨ Features
 
-- **240+ pieces of hardware**, each with its own 3D model and specs:
+- **340+ pieces of hardware**, each with its own 3D model and specs:
   - **91 GPUs:** GeForce RTX 50 back to GTX 10, Radeon RX 9000 back to RX 400, Intel Arc, TITAN and workstation cards, headless CMP, P104 and P106 mining cards, and passive datacenter cards like the A100 and Instinct MI50
   - **62 ASIC miners:** Bitmain, MicroBT, Canaan, IceRiver, Goldshell, Jasminer, Elphapex, VolcMiner and Innosilicon, including water-cooled hydro units, home-heater miners and tiny open-source boards
   - **Power and site gear:** 14 PSUs, 8 rig frames, 7 racks (up to a 20 ft container pod), 15 cooling units (box fans to evaporative towers, chillers and immersion tanks), 8 inverters, 8 batteries, 7 solar arrays, 4 generators
+  - **PCs, NAS and servers:** 24 machines (used Lenovo and Dell minis, Intel / ASUS NUCs, Minisforum, Synology and QNAP NAS, Fractal, NZXT and Lian Li towers, Supermicro chassis, HPE ProLiant and Dell PowerEdge), 11 motherboards, 22 CPUs (Ryzen, Core, Xeon, EPYC), 16 memory modules, 23 drives (desktop, NAS, surveillance, enterprise, SAS, SSD, NVMe) and 4 UPS units
   - **Rig parts and mods:** 7 riser types, 7 boot drives, thermal pads, copper shims, fresh thermal paste and replacement fans
 - Shop **search and sort** by profit, payback time, price or release year
+- **Side business: hosting.** Build mini PCs, NAS boxes, towers and rack servers from parts that have to match (socket, memory type, bays, SATA/SAS, M.2, PSU), then host websites, game servers, email, backups, CCTV recording, render nodes, ERP databases and VPS blocks for clients. Keep uptime above their SLA, protect their data with mirrored drives, ride out load-shedding with a UPS, and grow your reputation to unlock bigger clients
+- **Save slots**, plus download and upload your save as a file
 - **Goals** that walk you through your first rig, then endless profit milestones that double each time, with cash rewards
 - **Build from the Floor:** click a rig to see what's in it and what's in your inventory, add or remove parts, or Auto-fill. New purchases install themselves into a rig with room
 - **Time away counts:** come back to a "Welcome back" report (1 game hour per real minute, up to a game week)

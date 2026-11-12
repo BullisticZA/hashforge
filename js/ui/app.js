@@ -3,6 +3,7 @@
 import {
   ALGOS, GPU_ALGOS, GPUS, ASICS, PSUS, FRAMES, COOLING, RACKS, INVERTERS, BATTERIES, SOLAR, GENERATORS,
   LOCATIONS, REGIONS, RISERS, BOOT, MODS, OS, FACILITY, byId,
+  CASES, BOARDS, CPUS, RAM, DRIVES, UPSES, DRIVE_CLASS, CLIENT_TYPES, SERVER_OS,
 } from '../data/catalog.js';
 import { QUALITY, JUNK_LOTS, UPGRADES, upgradeCost, forkThreshold, forkReward, CRAFT_FEE, PART_TYPES } from '../data/progression.js';
 import * as E from '../sim/engine.js';
@@ -13,17 +14,23 @@ const SAVE_KEY = 'hashforge-save-v2';
 const SPEEDS = [0, 1, 6, 24, 96];          // game hours per real second
 const $ = (sel) => document.querySelector(sel);
 
+const SLOTS_KEY = 'hashforge-slots-v1';
+// Grouped menu: run the operation, buy hardware, build things, grow.
 const NAV = [
-  ['floor', '🏭', 'Floor'], ['shop', '🛒', 'Vendors'], ['used', '♻️', 'Used'], ['junk', '🗑️', 'Junkyard'],
-  ['bench', '🛠️', 'Workbench'], ['inventory', '📦', 'Inventory'], ['power', '⚡', 'Power'], ['market', '📈', 'Market'],
-  ['fork', '🔱', 'Hard Fork'], ['settings', '⚙️', 'Settings'],
+  ['Run', [['floor', '🏭', 'Floor'], ['servers', '🖥️', 'Servers'], ['clients', '🤝', 'Clients'], ['power', '⚡', 'Power']]],
+  ['Buy', [['shop', '🛒', 'Vendors'], ['used', '♻️', 'Used'], ['junk', '🗑️', 'Junkyard']]],
+  ['Build', [['bench', '🛠️', 'Workbench'], ['inventory', '📦', 'Inventory']]],
+  ['Grow', [['market', '📈', 'Market'], ['fork', '🔱', 'Hard Fork'], ['settings', '⚙️', 'Settings']]],
 ];
 const SHOP_TABS = [
   ['gpu', 'GPUs', GPUS], ['asic', 'ASIC miners', ASICS], ['frame', 'Rig kits', FRAMES], ['psu', 'Power supplies', PSUS],
   ['parts', 'Risers, boot & thermal', [...RISERS, ...BOOT, ...MODS]],
   ['rack', 'Racks', RACKS], ['cooling', 'Cooling & AC', COOLING], ['energy', 'Solar & backup', [...INVERTERS, ...BATTERIES, ...SOLAR, ...GENERATORS]],
+  ['pc', 'PCs, NAS & servers', CASES], ['components', 'PC & server parts', [...BOARDS, ...CPUS, ...RAM, ...DRIVES]], ['ups', 'UPS', UPSES],
   ['location', 'Locations', []],
 ];
+const COMPONENT_KINDS = [['all', 'All'], ['board', 'Motherboards'], ['cpu', 'CPUs'], ['ram', 'Memory'], ['drive', 'Drives']];
+const SERVER_PARTS = ['board', 'cpu', 'ram', 'drive', 'psu', 'gpu'];
 
 export class App {
   constructor() {
@@ -117,7 +124,7 @@ export class App {
   }
 
   result(res, okText) {
-    if (!res.ok) { this.toast(res.error, 'bad'); return false; }
+    if (!res.ok) { this.toast(res.error, 'bad'); this.render(true); return false; }
     if (okText) this.toast(okText, 'good');
     this.render(true);
     return true;
@@ -135,6 +142,7 @@ export class App {
       this.act(action, { id, uid, arg, el });
     });
     document.addEventListener('change', (e) => {
+      if (e.target.id === 'import-file' && e.target.files?.[0]) { this.importSave(e.target.files[0]); e.target.value = ''; return; }
       const el = e.target.closest('[data-change]');
       if (!el) return;
       this.act(el.dataset.change, { value: el.value, uid: el.dataset.uid, el });
@@ -253,18 +261,42 @@ export class App {
       }
       case 'upgrade': this.result(E.buyUpgrade(s, a.id), 'Upgrade unlocked'); break;
       case 'fork': {
-        if (!confirm('Hard Fork? Your hardware, cash and location reset. You keep Fork Shards and upgrades.')) return;
+        if (!this.confirmTwice(a.el, 'Click again to Hard Fork')) return;
         const res = E.hardFork(s);
         if (res.ok) { this.state = res.state; this.money = makeMoney(this.state); this.toast(`Hard Fork complete: +${res.reward} Fork Shards`, 'gold'); this.save(); this.render(true); }
         else this.toast(res.error, 'bad');
         break;
       }
       case 'new-game':
-        if (!confirm('Start a brand new game? This deletes your save, including prestige.')) return;
+        if (!this.confirmTwice(a.el, 'Click again: this wipes your save')) return;
         this.state = E.newGame(undefined, { region: this.state.region, tariffLocal: this.state.tariffLocal, fx: this.state.fx });
         this.money = makeMoney(this.state); this.save(); this.render(true);
         break;
       case 'tour': this.openTour(); break;
+      // ---- servers
+      case 'srv-select': this.serverSel = this.serverSel === a.uid ? null : a.uid; this.render(true); break;
+      case 'srv-add': this.result(E.installServerPart(s, a.arg, a.uid), 'Installed'); break;
+      case 'srv-remove': this.result(E.removeServerPart(s, a.arg, a.uid), 'Removed to inventory'); break;
+      case 'srv-autofill': { const r = E.autoFillServer(s, a.uid); this.result(r, r.ok ? `Installed ${r.added} part${r.added > 1 ? 's' : ''}` : ''); break; }
+      case 'srv-toggle': { const sv = s.servers.find((x) => x.uid === a.uid); if (sv) { sv.on = !sv.on; this.render(true); } break; }
+      case 'srv-raid': { const sv = s.servers.find((x) => x.uid === a.uid); this.result(E.setRaid(s, a.uid, !sv?.raid), sv?.raid ? 'Drive protection off' : 'Drive protection on: one drive can fail without losing data'); break; }
+      case 'srv-os': this.result(E.setServerOs(s, a.uid, a.value), 'Operating system changed'); break;
+      case 'srv-rename': this.result(E.renameServer(s, a.uid, a.value)); break;
+      case 'srv-3d': this.openMachine(a.uid); break;
+      case 'srv-shop': this.buildFor = a.uid; this.view = 'shop'; this.shopTab = 'components'; this.compKind = a.arg || 'all'; this.render(true); break;
+      case 'comp-kind': this.compKind = a.id; this.render(true); break;
+      case 'fit-only': this.buildFor = this.buildFor ? null : (this.serverSel || s.servers[0]?.uid); this.render(true); break;
+      // ---- clients
+      case 'offer-accept': { const r = E.acceptOffer(s, a.id, a.arg || undefined); this.result(r, r.ok ? `Signed ${r.client.client}` : ''); break; }
+      case 'client-move': { const [cid, uid] = a.value.split('|'); if (uid) this.result(E.moveClient(s, cid, uid), 'Client migrated'); break; }
+      case 'client-end': if (this.confirmTwice(a.el, 'End contract?')) this.result(E.endContract(s, a.id)); break;
+      // ---- saves
+      case 'save-now': this.save(); this.toast('Game saved', 'good'); break;
+      case 'slot-save': this.saveSlot(+a.arg); break;
+      case 'slot-load': if (this.confirmTwice(a.el, 'Load? Unsaved progress is lost')) this.loadSlot(+a.arg); break;
+      case 'slot-delete': if (this.confirmTwice(a.el, 'Delete?')) { const slots = this.slots(); slots[+a.arg] = null; this.writeSlots(slots); this.render(true); } break;
+      case 'export-save': this.exportSave(); break;
+      case 'import-save': $('#import-file')?.click(); break;
       case 'explode': this.viewer?.setExploded(a.el.classList.toggle('on')); break;
       case 'close-overlay': this.closeOverlay(); break;
       default: break;
@@ -287,19 +319,21 @@ export class App {
   }
 
   renderNav() {
-    $('#nav').innerHTML = NAV.map(([id, ico, label]) =>
-      `<button class="nav-btn" data-action="nav" data-id="${id}"><span class="ico">${ico}</span>${label}</button>`).join('');
+    $('#nav').innerHTML = NAV.map(([group, items]) => `<div class="nav-group">${group}</div>${items.map(([id, ico, label]) =>
+      `<button class="nav-btn" data-action="nav" data-id="${id}" title="${label}"><span class="ico">${ico}</span>${label}</button>`).join('')}`).join('');
   }
 
   renderHud() {
     const s = this.state; const r = this.room || E.roomStats(s); const m = this.money;
-    const profit = r.grossPerDay - r.demandWatts / 1000 * 24 * r.tariff * (r.offline ? 0 : 1);
+    const hosting = E.hostingPerDay(s);
+    const profit = r.grossPerDay + hosting - r.demandWatts / 1000 * 24 * r.tariff * (r.offline ? 0 : 1);
     const reg = E.region(s);
     const shedding = reg.loadShedding && s.grid.stage > 0;
     $('#hud').innerHTML = `
       <div class="brand"><span>HashForge</span></div>
       <div class="stat"><span class="muted">Cash</span><b class="${s.cash < 0 ? 'bad' : ''}">${m(s.cash)}</b></div>
       <div class="stat"><span class="muted">Profit / day</span><b class="${profit >= 0 ? 'good' : 'bad'}">${m(profit)}</b></div>
+      ${s.clients?.length ? `<div class="stat" title="Hosting income per day from ${s.clients.length} client(s)"><span class="muted">Hosting / day</span><b class="good">${m(hosting)}</b></div>` : ''}
       <div class="stat"><span class="muted">Power</span><b>${kw(r.demandWatts)}</b></div>
       <div class="stat"><span class="muted">Tariff</span><b>${m(s.tariffLocal / s.fx * r.location.tariffMult * E.effects(s).tariff, { precise: true })}/kWh</b></div>
       <div class="stat"><span class="muted">Chips</span><b class="${r.deviceTemp > 85 ? 'bad' : r.deviceTemp > 75 ? 'warn' : ''}">${r.minerWatts ? Math.round(r.deviceTemp) : Math.round(r.roomTemp)} °C</b></div>
@@ -319,6 +353,7 @@ export class App {
     const html = {
       floor: () => this.viewFloor(), shop: () => this.viewShop(), used: () => this.viewUsed(), junk: () => this.viewJunk(),
       bench: () => this.viewBench(), inventory: () => this.viewInventory(), power: () => this.viewPower(),
+      servers: () => this.viewServers(), clients: () => this.viewClients(),
       market: () => this.viewMarket(), fork: () => this.viewFork(), settings: () => this.viewSettings(),
     }[this.view]();
     if (!force && html === this.lastMainHtml) return;   // nothing changed: keep the DOM (and any click in progress)
@@ -337,6 +372,7 @@ export class App {
   onFloorSelect(pick) {
     if (pick.type === 'shop') { this.view = 'shop'; this.shopTab = pick.tab; this.render(true); return; }
     if (pick.type === 'power') { this.view = 'power'; this.render(true); return; }
+    if (pick.type === 'server') { this.view = 'servers'; this.serverSel = pick.uid; this.render(true); return; }
     this.selection = pick;
     if (this.floor) this.floor.selected = pick.uid;
     this.renderFloorDetails();
@@ -402,7 +438,7 @@ export class App {
     const algos = Object.entries(r.hashByAlgo);
     return `<div class="grid">
       <div class="card"><h3>Hashrate</h3>${algos.length ? algos.map(([a, h]) => `<div class="spread"><span>${ALGOS[a].name}</span><b class="mono">${hashrate(h, ALGOS[a].unit)}</b></div>`).join('') : '<div class="muted">Nothing mining yet.</div>'}</div>
-      <div class="card"><h3>Today</h3><div class="kv"><span>Mining</span><span class="good">${m(r.grossPerDay)}/day</span><span>Power</span><span class="bad">${m(r.demandWatts / 1000 * 24 * r.tariff)}/day</span><span>Net worth</span><span>${m(E.netWorth(this.state))}</span></div></div>
+      <div class="card"><h3>Today</h3><div class="kv"><span>Mining</span><span class="good">${m(r.grossPerDay)}/day</span>${this.state.clients?.length ? `<span>Hosting</span><span class="good">${m(E.hostingPerDay(this.state))}/day</span>` : ''}<span>Power</span><span class="bad">${m(r.demandWatts / 1000 * 24 * r.tariff)}/day</span><span>Net worth</span><span>${m(E.netWorth(this.state))}</span></div></div>
       <div class="card"><h3>Room</h3><div class="kv"><span>Dust</span><span class="${r.dust > 0.4 ? 'warn' : ''}">${Math.round(r.dust * 100)}% <button class="btn" style="padding:2px 8px" data-action="clean">Clean ${m(E.cleanCost(this.state))}</button></span><span>Room temp</span><span>${r.roomTemp.toFixed(1)} °C</span><span>Cooling</span><span>${kw(r.coolingCapacity)} of ${kw(r.minerWatts)} heat</span><span>Circuit</span><span class="${r.circuitPct > 0.9 ? 'bad' : ''}">${Math.round(r.circuitPct * 100)}%</span><span>Throttle</span><span class="${r.throttle < 1 ? 'warn' : ''}">${Math.round(r.throttle * 100)}%</span></div></div>
     </div>`;
   }
@@ -415,17 +451,51 @@ export class App {
       .sort((a, b) => (b.uid === this.selection?.uid) - (a.uid === this.selection?.uid) || room(b) - room(a));
   }
 
-  /** After a purchase, put GPUs, PSUs and boot drives straight into a rig that has room. Returns the rig name or null. */
+  /** After a purchase, put parts straight into a rig or machine that has room. Returns its name or null. */
   autoInstall(uid) {
     const s = this.state;
     if (s.autoInstall === false || !uid) return null;
     const o = this.findOwned(uid);
     if (!o || o.broken || !s.inventory.includes(o)) return null;
-    const kind = byId[o.id].kind;
-    const rig = this.rigsWithRoom(kind)[0];
-    if (!rig) return null;
-    const res = kind === 'gpu' ? E.installGpu(s, rig.uid, uid) : kind === 'psu' ? E.installPsu(s, rig.uid, uid) : kind === 'boot' ? E.installBoot(s, rig.uid, uid) : { ok: false };
-    return res.ok ? rig.name : null;
+    const spec = byId[o.id]; const kind = spec.kind;
+    const buildingMachine = (this.view === 'shop' && ['components', 'pc'].includes(this.shopTab)) || this.view === 'servers' || !!this.buildFor;
+    const tryRig = () => {
+      const rig = this.rigsWithRoom(kind)[0];
+      if (!rig) return null;
+      const res = kind === 'gpu' ? E.installGpu(s, rig.uid, uid) : kind === 'psu' ? E.installPsu(s, rig.uid, uid) : kind === 'boot' ? E.installBoot(s, rig.uid, uid) : { ok: false };
+      return res.ok ? rig.name : null;
+    };
+    const tryMachine = () => {
+      const m = this.machinesFor(spec)[0];
+      return m && E.installServerPart(s, m.uid, uid).ok ? m.name : null;
+    };
+    if (['board', 'cpu', 'ram', 'drive'].includes(kind)) return tryMachine();
+    if (kind === 'psu') return buildingMachine ? tryMachine() || tryRig() : tryRig() || tryMachine();
+    if (kind === 'gpu') return buildingMachine ? tryMachine() || tryRig() : tryRig();
+    if (kind === 'boot') return tryRig();
+    return null;
+  }
+
+  /** Machines a part would fit in right now, the one being built first. */
+  machinesFor(part) {
+    if (!SERVER_PARTS.includes(part.kind)) return [];
+    const list = (this.state.servers || []).filter((m) => !E.serverPartProblem(m, part));
+    const pref = this.buildFor || this.serverSel;
+    return list.sort((a, b) => (b.uid === pref) - (a.uid === pref));
+  }
+
+  /** Two-click confirm without browser pop-ups: the first click arms the button for a few seconds. */
+  confirmTwice(el, text) {
+    if (!el) return true;
+    if (el.dataset.armed === '1') return true;
+    el.dataset.armed = '1';
+    const old = el.textContent;
+    el.textContent = text;
+    el.classList.add('armed');
+    clearTimeout(this.armTimer);
+    this.armTimer = setTimeout(() => { el.dataset.armed = ''; el.textContent = old; el.classList.remove('armed'); }, 3500);
+    this.pointerDown = true; setTimeout(() => { this.pointerDown = false; }, 3500);   // keep the armed button on screen
+    return false;
   }
 
   /** Installed parts and matching inventory for a rig, so it can be built without opening 3D. */
@@ -524,6 +594,22 @@ export class App {
       riser: () => [['Power input', item.power], ['Reliability', item.reliability <= 0.5 ? 'Excellent' : item.reliability <= 1 ? 'Average' : 'Poor'], ...(item.fireRisk ? [['⚠ Warning', 'SATA connectors are rated below what a card can pull: fire risk']] : [])],
       boot: () => [['Capacity', `${item.gb} GB`], ['Reliability', item.reliability <= 0.5 ? 'Excellent' : item.reliability <= 1 ? 'Good' : 'Fair (flash wears out)']],
       mod: () => [['Effect', item.desc]],
+      case: () => {
+        const b = item.board;
+        return [
+          ['Type', { nuc: 'Mini PC (barebone)', nas: 'NAS appliance', tower: 'PC case', rack: `${item.rackU}U rack server` }[item.type]],
+          ...(b ? [[b.form === 'integrated' ? 'CPU' : 'Board', b.form === 'integrated' ? `${b.cpu} · ${b.cores}C/${b.threads}T` : `${b.cpuSockets}× ${b.socket} socket`],
+            ['Memory', `${b.ramSlots}× ${b.ramType}${b.ramBuiltin ? ` (${b.ramBuiltin} GB fitted)` : ''}, max ${b.maxRam} GB`]] : [['Motherboard', (item.forms || []).map((f) => f.toUpperCase()).join(' / ')]]),
+          ['Drive bays', [item.bays35 && `${item.bays35}× 3.5"`, item.bays25 && `${item.bays25}× 2.5"`, b?.m2 && `${b.m2}× M.2`].filter(Boolean).join(' · ') || 'M.2 only'],
+          ['Power supply', item.psu ? `Built in, ${item.psu.watts} W` : 'Add your own PSU'],
+          ...(item.sas ? [['Extras', 'SAS backplane']] : []), ...(item.gpuSlots ? [['GPU slots', item.gpuSlots]] : []),
+        ];
+      },
+      board: () => [['Socket', `${item.cpuSockets > 1 ? `${item.cpuSockets}× ` : ''}${item.socket}`], ['Form factor', item.form.toUpperCase()], ['Memory', `${item.ramSlots}× ${item.ramType}, max ${item.maxRam} GB`], ['Storage', `${item.m2}× M.2 · ${item.sata}× SATA`]],
+      cpu: () => [['Socket', item.socket], ['Cores / threads', `${item.cores} / ${item.threads}`], ['Power', `${item.watts} W TDP`]],
+      ram: () => [['Type', item.type.replace('-SO', ' SO-DIMM').replace('-ECC', ' ECC')], ['Size', `${item.gb} GB`]],
+      drive: () => [['Capacity', E.fmtTb(item.tb)], ['Interface', `${item.iface.toUpperCase()}${item.size === 'm2' ? ' (M.2)' : ` · ${item.size}"`}`], ['Class', `${DRIVE_CLASS[item.cls].name}: ${DRIVE_CLASS[item.cls].note}`], ['Power', `${item.watts} W`]],
+      ups: () => [['Battery', `${item.wh} Wh`], ['Max load', `${item.maxW} W`], ['Runtime', `~${Math.round(item.wh / 150 * 60)} min at 150 W`]],
     }[item.kind];
     return lines ? `<div class="kv">${lines().map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('')}</div>` : '';
   }
@@ -543,6 +629,15 @@ export class App {
         ${i === cur ? '<span class="tag">You are here</span>' : i < cur ? '<span class="tag">Outgrown</span>' : `<button class="btn primary" data-action="move" data-id="${l.id}">Move here</button>`}</div>`).join('')}</div>`;
     }
     let items = SHOP_TABS.find(([id]) => id === this.shopTab)[2];
+    let subbar = '';
+    if (this.shopTab === 'components') {
+      const kind = this.compKind || 'all';
+      if (kind !== 'all') items = items.filter((it) => it.kind === kind);
+      const target = this.buildFor && s.servers.find((x) => x.uid === this.buildFor);
+      if (target) items = items.filter((it) => !E.serverPartProblem(target, it));
+      subbar = `<div class="row" style="margin-bottom:10px">${COMPONENT_KINDS.map(([k, l]) => `<button class="chip ${kind === k ? 'on' : ''}" data-action="comp-kind" data-id="${k}">${l}</button>`).join('')}
+        ${s.servers.length ? `<label class="row small" style="margin-left:auto"><input type="checkbox" data-action="fit-only" ${target ? 'checked' : ''}> Only show parts that fit ${target ? esc(target.name) : 'my machine'}</label>` : ''}</div>`;
+    }
     const f = (this.shopFilter || '').toLowerCase();
     if (f) items = items.filter((it) => `${it.name} ${it.gen || ''} ${it.maker || ''} ${it.vendor || ''} ${it.algo ? ALGOS[it.algo].name : ''}`.toLowerCase().includes(f));
     if (['gpu', 'asic'].includes(this.shopTab)) {
@@ -553,7 +648,7 @@ export class App {
     }
     const toolbar = `<div class="row" style="margin-bottom:12px"><input type="search" placeholder="Search ${items.length} items… (e.g. RTX 30, Antminer, Kaspa)" value="${esc(this.shopFilter || '')}" data-change="shop-filter" style="flex:1;min-width:220px">
       ${['gpu', 'asic'].includes(this.shopTab) ? `<select data-change="shop-sort">${[['profit', 'Most profit / day'], ['roi', 'Best return on cost'], ['price', 'Cheapest'], ['newest', 'Newest']].map(([v, l]) => `<option value="${v}" ${(this.shopSort || 'profit') === v ? 'selected' : ''}>${l}</option>`).join('')}</select>` : ''}</div>`;
-    return `<div class="page-head"><div><h1>Vendors</h1><div class="muted">Brand new, full warranty, full price. Click any item to inspect it in 3D.</div></div>${tabs}</div>${toolbar}
+    return `<div class="page-head"><div><h1>Vendors</h1><div class="muted">Brand new, full warranty, full price. Click any item to inspect it in 3D.</div></div>${tabs}</div>${toolbar}${subbar}
       <div class="grid">${items.map((it) => `<div class="card product">
         <div class="spread"><span class="name">${esc(it.name)}</span>${it.year ? `<span class="tag">${it.year}</span>` : ''}</div>
         ${this.specLines(it)}
@@ -619,7 +714,8 @@ export class App {
       <div class="grid">${inv.map((o) => {
         const spec = byId[o.id];
         const targets = ['gpu', 'psu', 'boot'].includes(spec.kind) && !o.broken ? this.rigsWithRoom(spec.kind) : [];
-        return this.ownedCard(o, `${targets.length ? `<div class="row">${targets.slice(0, 3).map((r) => `<button class="btn primary" data-action="install-to" data-arg="${r.uid}" data-uid="${o.uid}">Install in ${esc(r.name)}</button>`).join('')}</div>` : ''}<div class="row">
+        const machines = !o.broken ? this.machinesFor(spec) : [];
+        return this.ownedCard(o, `${targets.length || machines.length ? `<div class="row">${targets.slice(0, 3).map((r) => `<button class="btn primary" data-action="install-to" data-arg="${r.uid}" data-uid="${o.uid}">Install in ${esc(r.name)}</button>`).join('')}${machines.slice(0, 3).map((m) => `<button class="btn primary" data-action="srv-add" data-arg="${m.uid}" data-uid="${o.uid}">Fit in ${esc(m.name)}</button>`).join('')}</div>` : ''}<div class="row">
           <button class="btn" data-action="inspect" data-id="${o.id}" data-uid="${o.uid}">3D</button>
           ${this.repairBtn(o)}
           ${spec.kind === 'gpu' ? `${this.modButtons(o)}<button class="btn" data-action="salvage" data-uid="${o.uid}">Salvage</button>` : ''}
@@ -728,6 +824,189 @@ export class App {
       }).join('')}</div>`;
   }
 
+  // ---------------------------------------------------------------- servers
+
+  partSpecs(m) {
+    const spec = (o) => (o ? { ...byId[o.id], broken: o.broken } : null);
+    return { board: m.board ? byId[m.board.id] : byId[m.id].board ? { ...byId[m.id].board } : null, cpus: m.cpus.map(spec), ram: m.ram.map(spec), drives: m.drives.map(spec), gpus: (m.gpus || []).map(spec), psu: spec(m.psu) };
+  }
+
+  openMachine(uid) {
+    const m = this.state.servers.find((x) => x.uid === uid);
+    if (!m) return;
+    const p = this.partSpecs(m);
+    this.openViewer(byId[m.id], { uid: m.uid, q: 'new', cond: 1, on: m.on, parts: { ...p, board: m.board ? byId[m.board.id] : null } });
+  }
+
+  meter(label, used, total, fmt = (v) => v) {
+    const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
+    return `<div class="meter"><div class="spread small"><span class="muted">${label}</span><span class="mono">${fmt(used)} / ${fmt(total)}</span></div>
+      <div class="bar"><i style="width:${pct}%;${pct > 90 ? 'background:var(--warn)' : ''}"></i></div></div>`;
+  }
+
+  viewServers() {
+    const s = this.state; const m = this.money; const loc = E.location(s);
+    const room = this.room || E.roomStats(s);
+    const cards = s.servers.map((sv, i) => {
+      const st = room.servers[i] || E.serverStats(s, sv);
+      const spec = byId[sv.id];
+      const sel = this.serverSel === sv.uid;
+      const pill = st.running ? (st.status === 'degraded' ? 'warn' : 'good') : st.status === 'off' ? 'muted' : 'bad';
+      return `<div class="card machine ${sel ? 'sel' : ''}">
+        <div class="spread"><div><div class="name">${esc(sv.name)}</div><div class="small muted">${esc(spec.name)}</div></div><span class="pill ${pill}">${esc(E.SERVER_STATUS[st.status])}</span></div>
+        <div class="meters">
+          ${this.meter('CPU threads', st.used.vcpu, st.vcpu)}
+          ${this.meter('Memory', st.used.ramGB, st.ramGB, (v) => `${v} GB`)}
+          ${this.meter(`Storage${st.raid ? ' (protected)' : ''}`, st.used.tb, st.usableTb, (v) => E.fmtTb(v))}
+        </div>
+        <div class="kv small"><span>Clients</span><span>${st.clients.length} · <b class="good">${m(st.payPerDay)}/day</b></span><span>Power</span><span>${Math.round(st.wallPower)} W${st.psuWatts ? ` of ${st.psuWatts} W PSU` : ''}</span>
+          <span>OS</span><span>${SERVER_OS[sv.os || 'linux'].name}</span></div>
+        <div class="row">
+          <button class="btn ${sel ? '' : 'primary'}" data-action="srv-select" data-uid="${sv.uid}">${sel ? 'Close' : '🔧 Build & manage'}</button>
+          <button class="btn" data-action="srv-3d" data-uid="${sv.uid}">3D</button>
+          <button class="btn" data-action="srv-toggle" data-uid="${sv.uid}">${sv.on ? 'Shut down' : 'Power on'}</button>
+        </div></div>`;
+    }).join('');
+    const selM = s.servers.find((x) => x.uid === this.serverSel);
+    const empty = !s.servers.length ? `<div class="card hero"><h3>Start a side business</h3>
+      <p class="muted">Build a PC, mini PC, NAS or rack server and host websites, game servers, backups and CCTV for clients. It earns every day, rain or shine, as long as your machines stay up.</p>
+      <ol class="small steps"><li>Buy a machine: a used Lenovo M720q Tiny or Dell OptiPlex Micro is the cheapest start.</li><li>Add memory and a drive (and for towers: a motherboard, CPU and PSU).</li><li>Sign clients in <b>Clients</b>. Add a UPS so load-shedding doesn't knock them offline.</li></ol>
+      <button class="btn primary" data-action="nav" data-id="shop" onclick="window.hf.shopTab='pc'">Shop PCs, NAS & servers</button></div>` : '';
+    return `<div class="page-head"><div><h1>Servers</h1><div class="muted">${s.servers.length}/${loc.serverSlots} machines · ${s.clients.length} clients · ${m(E.hostingPerDay(s))}/day hosting · ${Math.round(room.serverWatts)} W</div></div>
+      <div class="row"><button class="btn" data-action="nav" data-id="shop" onclick="window.hf.shopTab='pc'">+ Buy a machine</button><button class="btn" data-action="nav" data-id="shop" onclick="window.hf.shopTab='ups'">UPS units</button><button class="btn primary" data-action="nav" data-id="clients">Find clients</button></div></div>
+      ${empty}${selM ? this.serverBuildHtml(selM) : ''}<div class="grid machines">${cards}</div>`;
+  }
+
+  serverBuildHtml(sv) {
+    const s = this.state; const m = this.money;
+    const st = E.serverStats(s, sv);
+    const spec = byId[sv.id]; const board = st.board;
+    const row = (o, btn, extra = '') => `<div class="part-row${o.broken ? ' dead' : ''}"><span class="name">${esc(byId[o.id].name)}</span><span class="small muted">${extra}</span>${this.gradeTag(o.q)}<span class="small ${o.broken ? 'bad' : 'muted'}">${o.broken ? 'failed' : `${Math.round((o.cond ?? 1) * 100)}%`}</span>${btn}</div>`;
+    const rm = (o) => `<button class="btn small-btn" data-action="srv-remove" data-arg="${sv.uid}" data-uid="${o.uid}">Remove</button>`;
+    const info = (o) => { const p = byId[o.id]; return p.kind === 'cpu' ? `${p.cores}C/${p.threads}T` : p.kind === 'ram' ? `${p.gb} GB` : p.kind === 'drive' ? `${E.fmtTb(p.tb)} ${DRIVE_CLASS[p.cls].name}` : p.kind === 'psu' ? `${p.watts} W` : p.kind === 'gpu' ? `${p.vram} GB` : p.kind === 'board' ? p.socket : ''; };
+    const section = (title, list, need) => `<div class="part-head">${title}</div>${list.length ? list.map((o) => row(o, rm(o), info(o))).join('') : `<div class="small ${need ? 'bad' : 'muted'}">${need || 'None'}</div>`}`;
+    const builtIn = spec.board?.form === 'integrated';
+    const spare = s.inventory.filter((o) => SERVER_PARTS.includes(byId[o.id].kind));
+    const fits = spare.filter((o) => !o.broken && !E.serverPartProblem(sv, byId[o.id]));
+    const noFit = spare.filter((o) => !fits.includes(o)).slice(0, 6);
+    const shopBtn = (kind, label) => `<button class="chip" data-action="srv-shop" data-uid="${sv.uid}" data-arg="${kind}">${label}</button>`;
+    return `<div class="card build"><div class="spread"><div class="row"><span class="ico-lg">🔧</span><input class="rename" value="${esc(sv.name)}" data-change="srv-rename" data-uid="${sv.uid}" aria-label="Machine name" title="Click to rename"></div>
+        <div class="row"><button class="btn primary" data-action="srv-autofill" data-uid="${sv.uid}">⚡ Auto-fill from inventory</button><button class="btn" data-action="srv-3d" data-uid="${sv.uid}">View in 3D</button><button class="btn danger" data-action="sell" data-uid="${sv.uid}">Sell machine</button></div></div>
+      <div class="small muted">${esc(spec.name)} · ${builtIn ? `built-in ${esc(spec.board.cpu)} (${spec.board.cores}C/${spec.board.threads}T)` : spec.board ? `${spec.board.cpuSockets}× ${spec.board.socket} board` : `takes ${(spec.forms || []).join('/').toUpperCase()} boards`} · ${[spec.bays35 && `${spec.bays35}× 3.5"`, spec.bays25 && `${spec.bays25}× 2.5"`, board?.m2 && `${board.m2}× M.2`].filter(Boolean).join(' · ')}${spec.psu ? ` · ${spec.psu.watts} W PSU built in` : ''}</div>
+      <div class="parts-grid">
+        <div><h4>In this machine</h4>
+          ${spec.board ? '' : section('Motherboard', sv.board ? [sv.board] : [], 'Needs a motherboard')}
+          ${builtIn ? '' : section(`CPU ${sv.cpus.length}/${board?.cpuSockets || 1}`, sv.cpus, board ? 'Needs a CPU' : '')}
+          ${section(`Memory ${sv.ram.length}/${board?.ramSlots || '?'} slots${board?.ramBuiltin ? ` (+${board.ramBuiltin} GB built in)` : ''}`, sv.ram, board?.ramBuiltin ? '' : 'Needs memory')}
+          ${section(`Drives ${E.fmtTb(st.rawTb)} raw · ${E.fmtTb(st.usableTb)} usable`, sv.drives, 'Needs a drive')}
+          ${spec.psu ? '' : section('Power supply', sv.psu ? [sv.psu] : [], 'Needs a PSU')}
+          ${spec.gpuSlots ? section(`GPU ${(sv.gpus || []).length}/${spec.gpuSlots}`, sv.gpus || [], '') : ''}
+          <div class="row" style="margin-top:10px">
+            <label class="row small"><input type="checkbox" data-action="srv-raid" data-uid="${sv.uid}" ${sv.raid ? 'checked' : ''} ${sv.drives.length < 2 ? 'disabled' : ''}> Drive protection (mirror / RAID): survive one dead drive, lose one drive of space</label>
+          </div>
+          <div class="row small" style="margin-top:6px"><span class="muted">OS</span><select data-change="srv-os" data-uid="${sv.uid}">${Object.entries(SERVER_OS).map(([id, o]) => `<option value="${id}" ${(sv.os || 'linux') === id ? 'selected' : ''}>${o.name}${o.licence && !sv.windowsLicensed ? ` (licence ${m(o.licence)})` : ''}</option>`).join('')}</select></div>
+        </div>
+        <div><h4>Fits from your inventory</h4>
+          ${fits.map((o) => row(o, `<button class="btn primary small-btn" data-action="srv-add" data-arg="${sv.uid}" data-uid="${o.uid}">Add</button>`, info(o))).join('') || '<div class="small muted">Nothing in your inventory fits. Shop for parts that do:</div>'}
+          <div class="row" style="margin-top:8px">${spec.board ? '' : shopBtn('board', 'Motherboards')}${builtIn ? '' : shopBtn('cpu', 'CPUs')}${shopBtn('ram', 'Memory')}${shopBtn('drive', 'Drives')}</div>
+          ${noFit.length ? `<div class="part-head" style="margin-top:12px">Doesn't fit</div>${noFit.map((o) => `<div class="small muted">✕ ${esc(byId[o.id].name)}: ${esc(o.broken ? 'broken' : E.serverPartProblem(sv, byId[o.id]))}</div>`).join('')}` : ''}
+        </div>
+      </div></div>`;
+  }
+
+  // ---------------------------------------------------------------- clients
+
+  needChips(n) {
+    return [`${n.vcpu} threads`, `${n.ramGB} GB RAM`, E.fmtTb(n.tb), n.cls && `${DRIVE_CLASS[n.cls].name} drives`, n.raid && 'protected storage', n.ecc && 'ECC server', n.gpuVram && `GPU ${n.gpuVram} GB+`, n.os && SERVER_OS[n.os].name]
+      .filter(Boolean).map((t) => `<span class="tag">${esc(t)}</span>`).join(' ');
+  }
+
+  viewClients() {
+    const s = this.state; const m = this.money;
+    const rep = s.reputation || 0;
+    const next = CLIENT_TYPES.filter((t) => t.minRep > rep).sort((a, b) => a.minRep - b.minRep)[0];
+    const offers = (s.offers || []).map((o) => {
+      const t = CLIENT_TYPES.find((x) => x.id === o.typeId);
+      const fit = s.servers.find((sv) => !E.fitProblem(s, sv, o.needs));
+      const why = !s.servers.length ? 'Build a machine first' : fit ? `Fits ${fit.name}` : `No machine fits: ${E.fitProblem(s, s.servers[0], o.needs)}`;
+      return `<div class="card offer"><div class="spread"><span class="name">${t.icon} ${esc(o.client)}</span><span class="small muted">${Math.max(0, Math.ceil(o.expires - s.day))}d left</span></div>
+        <div class="small">${esc(t.name)}${o.detail ? ` · ${esc(o.detail)}` : ''}</div>
+        <div class="chips">${this.needChips(o.needs)}</div>
+        <div class="kv small"><span>Pays</span><span><b class="good">${m(o.payMonthly)}</b> / month</span><span>Contract</span><span>${o.months} months · ${Math.round(o.sla * 100)}% uptime promised</span></div>
+        <div class="spread"><span class="small ${fit ? 'good' : 'bad'}">${esc(why)}</span><button class="btn primary" data-action="offer-accept" data-id="${o.id}" ${fit ? '' : 'disabled'}>Sign</button></div></div>`;
+    }).join('');
+    const rows = s.clients.map((c) => {
+      const t = CLIENT_TYPES.find((x) => x.id === c.typeId);
+      const sv = s.servers.find((x) => x.uid === c.serverUid);
+      const sat = Math.round(c.satisfaction * 100);
+      const others = s.servers.filter((x) => x.uid !== c.serverUid && !E.fitProblem(s, x, c.needs));
+      return `<tr><td>${t.icon} <b>${esc(c.client)}</b><div class="small muted">${esc(t.name)}${c.detail ? ` · ${esc(c.detail)}` : ''}</div></td>
+        <td>${esc(sv?.name || '?')}</td><td class="good">${m(c.payMonthly)}/mo</td>
+        <td><div class="bar" title="${sat}%"><i style="width:${sat}%;background:${sat < 50 ? 'var(--bad)' : sat < 70 ? 'var(--warn)' : 'var(--good)'}"></i></div><span class="small muted">${sat}% happy</span></td>
+        <td class="small">${Math.max(0, Math.ceil(c.endDay - s.day))} days</td>
+        <td><div class="row">${others.length ? `<select data-change="client-move"><option value="">Move to…</option>${others.map((x) => `<option value="${c.id}|${x.uid}">${esc(x.name)}</option>`).join('')}</select>` : ''}<button class="btn danger small-btn" data-action="client-end" data-id="${c.id}">End</button></div></td></tr>`;
+    }).join('');
+    return `<div class="page-head"><div><h1>Clients</h1><div class="muted">Host for local businesses. Keep their machines up and they renew; let them go down and they leave.</div></div></div>
+      <div class="grid stats">
+        <div class="card"><h3>Reputation</h3><div class="big">${Math.floor(rep)} <span class="small muted">/ 100 · ${E.reputationTier(rep)}</span></div><div class="bar"><i style="width:${rep}%"></i></div>
+          <div class="small muted" style="margin-top:6px">${next ? `At ${next.minRep}: ${next.icon} ${esc(next.name)} clients start calling.` : 'Every kind of client knows your name.'}</div></div>
+        <div class="card"><h3>Hosting income</h3><div class="big good">${m(E.hostingPerDay(s))}<span class="small muted"> / day</span></div><div class="small muted">${s.clients.length} clients · ${m(s.stats.hostingUsd || 0)} earned so far</div></div>
+        <div class="card"><h3>Uptime protection</h3><div class="small">${(s.energy.ups || []).length ? `${s.energy.ups.length} UPS · ${Math.round(s.energy.ups.reduce((t, u) => t + u.charge, 0))} Wh ready` : '<span class="warn">No UPS: load-shedding takes clients offline.</span>'}</div>
+          <button class="btn" style="margin-top:8px" data-action="nav" data-id="shop" onclick="window.hf.shopTab='ups'">Shop UPS units</button></div>
+      </div>
+      <h3 style="margin:16px 0 8px">Looking for hosting (${(s.offers || []).length})</h3><div class="grid">${offers || '<div class="muted">No one right now. New clients call every day.</div>'}</div>
+      <h3 style="margin:18px 0 8px">Your clients (${s.clients.length})</h3>
+      ${rows ? `<div class="card table-wrap"><table class="clients"><thead><tr><th>Client</th><th>Machine</th><th>Pays</th><th>Satisfaction</th><th>Left</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="muted">No clients yet. Sign one above.</div>'}`;
+  }
+
+  // ---------------------------------------------------------------- saves
+
+  slots() {
+    try { const v = JSON.parse(localStorage.getItem(SLOTS_KEY) || '[]'); return [0, 1, 2].map((i) => v[i] || null); } catch { return [null, null, null]; }
+  }
+  writeSlots(slots) {
+    try { localStorage.setItem(SLOTS_KEY, JSON.stringify(slots)); return true; } catch { this.toast('Could not save: browser storage is full or blocked.', 'bad'); return false; }
+  }
+  saveSlot(i) {
+    const slots = this.slots();
+    this.state.savedAt = Date.now();
+    slots[i] = { at: Date.now(), day: this.state.day, cash: this.state.cash, worth: E.netWorth(this.state), loc: E.location(this.state).name, data: E.serialize(this.state) };
+    if (this.writeSlots(slots)) { this.toast(`Saved to slot ${i + 1}`, 'good'); this.render(true); }
+  }
+  loadSlot(i) {
+    const slot = this.slots()[i];
+    if (!slot) return;
+    try { this.useState(E.deserialize(slot.data)); this.toast(`Loaded slot ${i + 1}`, 'good'); } catch { this.toast('That save could not be loaded.', 'bad'); }
+  }
+  useState(state) {
+    this.state = state; this.money = makeMoney(state);
+    this.selection = null; this.serverSel = null; this.buildFor = null; this.awayReport = null; this.shownGameOver = false;
+    this.closeOverlay?.(); this.save(); this.render(true);
+  }
+  exportSave() {
+    this.save();
+    const blob = new Blob([E.serialize(this.state)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `hashforge-day${Math.floor(this.state.day) + 1}-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    this.toast('Save file downloaded', 'good');
+  }
+  async importSave(file) {
+    try { this.useState(E.deserialize(await file.text())); this.toast(`Loaded ${file.name}`, 'good'); } catch { this.toast('That file is not a HashForge save.', 'bad'); }
+  }
+  savesHtml() {
+    const m = this.money;
+    const slots = this.slots();
+    return `<div class="card saves"><h3>Saves</h3>
+      <div class="small muted">The game also saves itself every 10 seconds. Use slots to keep separate games or a backup before a big decision.</div>
+      <div class="slots">${slots.map((sl, i) => `<div class="slot"><div><b>Slot ${i + 1}</b>${sl ? `<div class="small muted">Day ${Math.floor(sl.day) + 1} · ${esc(sl.loc)} · ${m(sl.worth ?? sl.cash)} net worth</div><div class="small muted">${new Date(sl.at).toLocaleString()}</div>` : '<div class="small muted">Empty</div>'}</div>
+        <div class="row"><button class="btn small-btn primary" data-action="slot-save" data-arg="${i}">${sl ? 'Overwrite' : 'Save here'}</button>${sl ? `<button class="btn small-btn" data-action="slot-load" data-arg="${i}">Load</button><button class="btn small-btn danger" data-action="slot-delete" data-arg="${i}">Delete</button>` : ''}</div></div>`).join('')}</div>
+      <div class="row" style="margin-top:10px"><button class="btn" data-action="save-now">💾 Save now</button><button class="btn" data-action="export-save">⬇ Download save file</button><button class="btn" data-action="import-save">⬆ Load save file</button>
+        <input type="file" id="import-file" accept=".json,application/json" hidden></div></div>`;
+  }
+
   viewSettings() {
     const s = this.state; const reg = E.region(s);
     return `<div class="page-head"><h1>Settings</h1></div>
@@ -738,9 +1017,11 @@ export class App {
         <div class="card"><h3>Electricity tariff</h3>
           <div class="row"><span>${reg.symbol}</span><input type="number" step="0.01" min="0.01" value="${s.tariffLocal}" data-change="tariff" style="width:110px"><span>per kWh</span></div>
           <div class="small muted" style="margin-top:6px">Set it to the rate on your own electricity bill: every municipality and plan differs. Exchange rate: 1 USD = ${s.fx.toFixed(2)} ${reg.currency}${this.fxLive ? ' (live)' : ' (offline estimate)'}.</div></div>
-        <div class="card"><h3>Game</h3><div class="small muted">Saved automatically in this browser. Space pauses; keys 1-4 change speed.</div>
+        <div class="card"><h3>Game</h3><div class="small muted">Space pauses; keys 1-4 change speed.</div>
+          <label class="row small" style="margin-top:8px"><input type="checkbox" data-action="auto-install" ${s.autoInstall !== false ? 'checked' : ''}> Install new parts into a rig or machine automatically</label>
           <button class="btn danger" style="margin-top:8px" data-action="new-game">Start a new game</button></div>
       </div>
+      ${this.savesHtml()}
       <p class="disclaimer" style="margin-top:16px">HashForge is a game. Hardware names identify real products and belong to their owners; HashForge is not affiliated with any manufacturer. Hash rates, prices and tariffs are approximations, and coin prices are simulated. Nothing here is financial advice.</p>`;
   }
 
@@ -886,7 +1167,10 @@ export class App {
     if (this.viewer) this.viewer.renderer.domElement.style.display = 'none';
     $('#stage3d').querySelector('.stage-ctrl')?.remove();
     const { MiningRoom } = await import('../render/scene.js');
-    this.tour = new MiningRoom($('#stage3d'), { onSelect: (pick) => { if (pick.type === 'rig') { this.closeOverlay(); this.openRig(pick.uid); } } });
+    this.tour = new MiningRoom($('#stage3d'), { onSelect: (pick) => {
+      if (pick.type === 'rig') { this.closeOverlay(); this.openRig(pick.uid); }
+      if (pick.type === 'server') { this.closeOverlay(); this.view = 'servers'; this.serverSel = pick.uid; this.render(true); }
+    } });
     $('#overlay-panel').innerHTML = `<h3>Your operation in 3D</h3><div class="muted small">Drag to orbit, scroll to zoom. Fans spin with load, LEDs blink, and the lights die during outages. Click a rig to open its workshop.</div>${this.summaryCards()}`;
   }
 

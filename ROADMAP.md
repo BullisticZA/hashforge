@@ -41,26 +41,36 @@ a sensible start should *usually* make money in the first game-year, but never g
 - **Balance:** load-shedding settles around Stage 1 in summer and Stage 3 in winter, with short Stage 6–8 spikes instead of sticking at Stage 8; slower wear and failures; difficulty climbs more gently and eases in slumps
 - Sell inverters, batteries, solar and generators from the Power page
 
-## 🔜 v0.2: Builders & Workshop
+## ✅ v0.2: Servers & Hosting
+- **Servers screen:** mini PCs, NAS appliances, towers and rack servers built from motherboards, CPUs, RAM, drives, PSUs and GPUs, with real compatibility checks
+- **Clients screen:** hosting offers (websites, game servers, email, backups, CCTV, media, file servers, dev VMs, render nodes, ERP, cloud storage, AI inference, VPS) with SLAs, monthly pay, satisfaction and renewals
+- **Reputation** unlocks bigger clients; downtime and data loss cost you
+- **Drive protection (mirror / RAID)**, drive classes with different 24/7 failure rates, SAS backplanes, ECC requirements, Windows Server licences
+- **UPS units** keep servers up through load-shedding
+- Servers on the 2D floor (IT corner) and in the 3D tour, 3D models for every case, board, CPU, memory module, drive and UPS
+- **Save slots**, save-file download and upload, and in-game confirm buttons instead of browser pop-ups
+- Grouped menu: Run, Buy, Build, Grow
+
+## 🔜 v0.3: Builders & Workshop
 - **Thermal work:** repaste, new thermal pads, copper shims and plates: lower temps, less wear, more hashrate
 - **Workshop tools:** screwdriver kit, multimeter, thermal camera, reflow station, BIOS programmer. Better tools unlock better repairs
-- Build your own **PCs and servers**: CPUs, motherboards, RAM, HDD, SSD, M.2 NVMe, SAS drives, cases, server chassis
-- **Windows or Linux**, each with trade-offs (compatibility, overhead, stability, licence cost)
+- Junkyard and used-market server parts: pull Xeons, ECC RAM and SAS drives from decommissioned servers
+- One-off IT gigs: build a gaming PC for a client, repair a laptop, set up an office NAS
 - CPU mining (RAM- and cache-hungry) and **storage mining** (proof of space: plot and farm on your drives)
 - Many more junkyard part types and data-centre clearout lots
 
-## 🔜 v0.3: Network & Security
+## 🔜 v0.4: Network & Security
 - Switches, routers, cabling and uplinks; bandwidth and latency matter for pools
 - **Firewalls** and security upgrades; hacking attempts, malware and ransomware events
 - Remote monitoring and alerts
 
-## 🔜 v0.4: Empire & IT Partner
+## 🔜 v0.5: Empire & IT Partner
 - **Host for clients:** websites, storage, backups, design and IT services on monthly contracts, where uptime matters
 - Buy and expand **homes, warehouses and data halls**; several sites at once
 - **UPS systems**, three-phase power, transformers, grid contracts
 - Staff: technicians who repair, guards, network admins
 
-## 🔜 v0.5+: Endless
+## 🔜 v0.6+: Endless
 - Research tree, contracts and customer orders
 - Overclocking and undervolting
 - Achievements, seasonal events, rotating challenges

@@ -200,6 +200,42 @@ export class FloorPlan {
       this.hits.push({ x: ex, y: ey, w: cw, h: 34 * s, pick: { type: 'power' } });
     });
 
+    // ---- IT corner: PCs, NAS boxes and servers along the bottom of the centre area
+    const servers = state.servers || [];
+    const sh = 54 * s; const sw = 92 * s;
+    let sx = zoneLeft + 14 * s; const sy = fy + fh - sh - 26 * s;
+    if (servers.length || loc.serverSlots) {
+      ctx.fillStyle = '#4c638a'; ctx.font = `700 ${10 * s}px Inter, system-ui`;
+      ctx.fillText(`IT CORNER ${servers.length}/${loc.serverSlots}`, sx, sy - 6 * s);
+    }
+    servers.forEach((m, i) => {
+      if (sx + sw > zoneRight - 6 * s) return;
+      const st = room.servers?.[i];
+      const up = st?.running && !(dark && !state.hostingUp);
+      const sel = this.selected === m.uid;
+      this.panel(sx, sy, sw, sh, sel, up ? '#112a2a' : '#1a1d27');
+      ctx.fillStyle = '#e6edf7'; ctx.font = `700 ${10 * s}px Inter, system-ui`;
+      ctx.fillText(m.name, sx + 8 * s, sy + 15 * s);
+      ctx.fillStyle = up ? (st.status === 'degraded' ? COLORS.warn : '#34d399') : st?.status === 'off' ? '#8fa3c4' : COLORS.broken;
+      ctx.font = `${9 * s}px Inter, system-ui`;
+      ctx.fillText(up ? `${st.clients.length} client${st.clients.length === 1 ? '' : 's'}` : st?.status === 'off' ? 'off' : 'needs attention', sx + 8 * s, sy + 29 * s);
+      // blinking activity LEDs
+      for (let k = 0; k < Math.min(6, m.drives.length || 1); k++) {
+        const on = up && Math.sin(time * (4 + k) + i) > 0;
+        ctx.fillStyle = m.drives[k]?.broken ? COLORS.broken : on ? '#34d399' : '#1f3b35';
+        ctx.fillRect(sx + 8 * s + k * 9 * s, sy + 38 * s, 6 * s, 6 * s);
+      }
+      this.hits.push({ x: sx, y: sy, w: sw, h: sh, pick: { type: 'server', uid: m.uid } });
+      sx += sw + 8 * s;
+    });
+    if (servers.length < loc.serverSlots && sx + sw <= zoneRight - 6 * s) {
+      ctx.setLineDash([6 * s, 5 * s]); ctx.strokeStyle = '#2b3d60';
+      roundRect(ctx, sx, sy, sw, sh, 8 * s); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = '#4c638a'; ctx.font = `${10 * s}px Inter, system-ui`;
+      ctx.fillText('+ Server / PC', sx + 10 * s, sy + 31 * s);
+      this.hits.push({ x: sx, y: sy, w: sw, h: sh, pick: { type: 'shop', tab: 'pc' } });
+    }
+
     // Outage overlay
     if (dark) {
       ctx.fillStyle = `rgba(120,0,0,${0.18 + 0.08 * Math.sin(time * 3)})`;

@@ -10,7 +10,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 import { byId } from '../data/catalog.js';
 import {
-  makeRig, makeRack, makeCooling, makeInverter, makeBattery, makeSolar, makeGenerator,
+  makeRig, makeRack, makeCooling, makeInverter, makeBattery, makeSolar, makeGenerator, makeMachine, makeUps,
 } from './models.js';
 
 function concreteTexture() {
@@ -169,6 +169,8 @@ export class MiningRoom {
       state.cooling.map((c) => c.id),
       state.energy.inverters.map((i) => i.id), state.energy.batteries.map((b) => [b.id, Math.round((b.soc || 0) / byId[b.id].kwh * 5)]),
       state.energy.solar.map((s) => s.id), state.energy.generators.map((g) => g.id),
+      (state.servers || []).map((m) => [m.uid, m.id, m.on, m.board?.id, m.cpus.length, m.ram.length, m.drives.map((d) => d.id + d.broken), (m.gpus || []).map((g) => g.id)]),
+      (state.energy.ups || []).map((u) => u.id),
     ]);
     if (key !== this.layoutKey) {
       if (!this.layoutKey.startsWith(`["${loc.id}"`)) {
@@ -224,6 +226,21 @@ export class MiningRoom {
       m.position.set(-loc.w / 2 + 2.2 + (rack.id === 'container' ? 1.3 : 0), 0, rz + span / 2);
       rz += span + 0.6;
       add(m, { type: 'rack', uid: rack.uid });
+    });
+    // IT corner: PCs, NAS boxes and servers along the front-left wall, UPS units beside them
+    let sx = -loc.w / 2 + 1.2;
+    (state.servers || []).forEach((sv) => {
+      const spec = byId[sv.id];
+      const parts = { board: sv.board ? byId[sv.board.id] : null, cpus: sv.cpus.map((c) => byId[c.id]), ram: sv.ram.map((r) => byId[r.id]), drives: sv.drives.map((d) => ({ ...byId[d.id], broken: d.broken })), gpus: (sv.gpus || []).map((g) => byId[g.id]) };
+      const m = makeMachine(spec, parts, { on: sv.on });
+      const w = spec.type === 'rack' ? 4.6 : spec.type === 'tower' ? 1.5 : spec.type === 'nas' ? 0.42 * (spec.bays35 || 2) + 0.9 : 2.0;
+      m.rotation.y = 0;
+      m.position.set(sx + w / 2, 0, loc.d / 2 - 1.8);
+      add(m, { type: 'server', uid: sv.uid });
+      sx += w + 0.4;
+    });
+    (state.energy.ups || []).forEach((u) => {
+      const m = makeUps(byId[u.id]); m.rotation.y = Math.PI; m.position.set(sx + 0.8, 0, loc.d / 2 - 1.8); add(m, { type: 'energy', uid: u.uid }); sx += 1.6;
     });
     // Cooling on the right
     state.cooling.forEach((c, i) => {

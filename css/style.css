@@ -32,6 +32,8 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.3px; }
 .speed button, .chip { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; }
 .speed button.on { background: var(--accent); color: #031018; border-color: var(--accent); font-weight: 700; }
 
+.nav-group { font-size: 9px; text-transform: uppercase; letter-spacing: 1px; color: #4c638a; text-align: center; margin: 8px 0 2px; }
+.nav-group:first-child { margin-top: 0; }
 .nav-btn { background: none; border: 1px solid transparent; border-radius: 10px; padding: 10px 4px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
 .nav-btn .ico { font-size: 22px; line-height: 1; }
 .nav-btn:hover { background: var(--card); color: var(--text); }
@@ -134,3 +136,40 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.3px; }
   #main { grid-row: 2; }
   #hud { flex-wrap: nowrap; height: auto; padding: 8px; }
 }
+
+/* chips, pills, meters */
+.chip.on { border-color: var(--accent); color: var(--accent); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.pill { font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 99px; border: 1px solid currentColor; white-space: nowrap; }
+.pill.good { color: var(--good); } .pill.warn { color: var(--warn); } .pill.bad { color: var(--bad); } .pill.muted { color: var(--muted); }
+.meters { display: grid; gap: 6px; margin: 10px 0; }
+.meter .bar { height: 7px; }
+.btn.armed { background: #7f1d1d; color: #fff; border-color: var(--bad); }
+.ico-lg { font-size: 20px; }
+
+/* servers */
+.machines { margin-top: 12px; }
+.card.machine .name { font-weight: 800; font-size: 15px; }
+.card.machine.sel { border-color: var(--accent); box-shadow: 0 0 0 1px #5ee7ff44 inset; }
+.card.build { border-color: #2f4b7a; background: linear-gradient(180deg, #13203a, var(--card)); margin-bottom: 12px; }
+.card.build h4 { margin: 4px 0 2px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; }
+.card.build .part-row { grid-template-columns: minmax(0, 1fr) auto auto auto auto; }
+.rename { font-weight: 800; font-size: 16px; background: transparent; border: 1px dashed transparent; padding: 2px 6px; width: 200px; }
+.rename:hover, .rename:focus { border-color: var(--line); background: var(--bg2); }
+.card.hero { border-color: #2f4b7a; background: linear-gradient(135deg, #13233f, #1a1840); max-width: 760px; }
+.card.hero .steps { margin: 8px 0 12px; padding-left: 18px; line-height: 1.6; }
+
+/* clients */
+.stats .big { font-size: 26px; font-weight: 800; margin: 2px 0 6px; }
+.card.offer .name { font-weight: 700; }
+.table-wrap { overflow-x: auto; padding: 0; }
+table.clients { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.clients th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line); }
+table.clients td { padding: 10px 12px; border-bottom: 1px solid #1a2741; vertical-align: middle; }
+table.clients td .bar { width: 110px; }
+table.clients select { font-size: 12px; padding: 3px 6px; }
+
+/* saves */
+.slots { display: grid; gap: 8px; margin-top: 10px; }
+.slot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.card.saves { margin-top: 12px; max-width: 760px; }

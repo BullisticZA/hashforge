@@ -167,10 +167,10 @@ export const REGIONS = [
 
 // Locations: space, circuit size and how much cheaper than home power they are (tariffMult).
 export const LOCATIONS = [
-  { id: 'bedroom', name: 'Bedroom Corner', rigSlots: 2, rackSlots: 1, coolingSlots: 2, roofKwp: 4.4, circuitKw: 3.6, tariffMult: 1.0, ambient: 24, roomSize: 1, price: 0, w: 10, d: 8 },
-  { id: 'garage', name: 'Double Garage', rigSlots: 6, rackSlots: 2, coolingSlots: 3, roofKwp: 12, circuitKw: 15, tariffMult: 0.9, ambient: 26, roomSize: 2.2, price: 6000, w: 16, d: 12 },
-  { id: 'warehouse', name: 'Industrial Warehouse', rigSlots: 16, rackSlots: 6, coolingSlots: 6, roofKwp: 100, circuitKw: 120, tariffMult: 0.6, ambient: 22, roomSize: 6, price: 45000, w: 30, d: 20 },
-  { id: 'hydro', name: 'Hydro-Powered Mining Hall', rigSlots: 30, rackSlots: 14, coolingSlots: 10, roofKwp: 200, circuitKw: 500, tariffMult: 0.25, ambient: 12, roomSize: 14, price: 250000, w: 44, d: 28 },
+  { id: 'bedroom', serverSlots: 2, name: 'Bedroom Corner', rigSlots: 2, rackSlots: 1, coolingSlots: 2, roofKwp: 4.4, circuitKw: 3.6, tariffMult: 1.0, ambient: 24, roomSize: 1, price: 0, w: 10, d: 8 },
+  { id: 'garage', serverSlots: 6, name: 'Double Garage', rigSlots: 6, rackSlots: 2, coolingSlots: 3, roofKwp: 12, circuitKw: 15, tariffMult: 0.9, ambient: 26, roomSize: 2.2, price: 6000, w: 16, d: 12 },
+  { id: 'warehouse', serverSlots: 16, name: 'Industrial Warehouse', rigSlots: 16, rackSlots: 6, coolingSlots: 6, roofKwp: 100, circuitKw: 120, tariffMult: 0.6, ambient: 22, roomSize: 6, price: 45000, w: 30, d: 20 },
+  { id: 'hydro', serverSlots: 40, name: 'Hydro-Powered Mining Hall', rigSlots: 30, rackSlots: 14, coolingSlots: 10, roofKwp: 200, circuitKw: 500, tariffMult: 0.25, ambient: 12, roomSize: 14, price: 250000, w: 44, d: 28 },
 ];
 
 // PCIe risers: every rig kit ships with basic 009S risers (Molex / 6-pin powered).
@@ -392,5 +392,7 @@ MODS.push(
   { id: 'fans', name: 'GPU Fan Replacement Set', desc: 'New fans: restores 25% condition on a worn card.', price: 18, kind: 'mod', consumable: true },
 );
 
-export const ALL_ITEMS = [...GPUS, ...ASICS, ...PSUS, ...FRAMES, ...COOLING, ...RACKS, ...INVERTERS, ...BATTERIES, ...SOLAR, ...GENERATORS, ...RISERS, ...BOOT, ...MODS];
+import { HARDWARE } from './hardware.js';
+export { CASES, BOARDS, CPUS, RAM, DRIVES, UPSES, DRIVE_CLASS, CLIENT_TYPES, SERVER_OS } from './hardware.js';
+export const ALL_ITEMS = [...GPUS, ...ASICS, ...PSUS, ...FRAMES, ...COOLING, ...RACKS, ...INVERTERS, ...BATTERIES, ...SOLAR, ...GENERATORS, ...RISERS, ...BOOT, ...MODS, ...HARDWARE];
 export const byId = Object.fromEntries(ALL_ITEMS.map((i) => [i.id, i]));

@@ -883,6 +883,226 @@ export function makeShowcase(spec, owned = {}) {
     case 'battery': return makeBattery(spec, spec.kwh * 0.8, spec.kwh);
     case 'solar': return makeSolar(spec);
     case 'generator': return makeGenerator(spec);
+    case 'case': return makeMachine(spec, owned.parts || {}, { on: owned.on !== false });
+    case 'board': return makeBoardModel(spec);
+    case 'cpu': return makeCpuChip(spec);
+    case 'ram': return makeRamStick(spec);
+    case 'drive': return makeDrive(spec, { broken: owned.broken });
+    case 'ups': return makeUps(spec);
     default: return new THREE.Group();
   }
+}
+
+// ------------------------------------------------------------------ PCs, servers and NAS
+
+/** CPU package: substrate, heat spreader, model text. Server sockets are bigger. */
+export function makeCpuChip(spec) {
+  const g = new THREE.Group();
+  const big = /LGA3647|LGA4189|SP3|SP5/.test(spec.socket);
+  const mid = /LGA2011/.test(spec.socket);
+  const [w, d] = big ? [1.4, 2.0] : mid ? [1.2, 1.4] : [1.0, 1.0];
+  g.add(box(w, 0.06, d, M.pcbGreen(), 0, 0.03, 0));
+  g.add(box(w * 0.82, 0.1, d * 0.82, M.alu(), 0, 0.11, 0, 0.03));
+  const t = label(spec.name.replace(/ \(used\)/, ''), w * 0.76, 0.22, { color: '#1b2533' });
+  t.rotation.x = -Math.PI / 2; t.position.set(0, 0.162, 0); g.add(t);
+  const pads = [];
+  for (let i = 0; i < 8; i++) for (let k = 0; k < 8; k++) pads.push([-w * 0.4 + i * w * 0.115, -0.005, -d * 0.4 + k * d * 0.115]);
+  g.add(instancedBoxes(0.04, 0.01, 0.04, M.gold(), pads));
+  g.userData = { kind: 'cpu', spinners: [], leds: [] };
+  return g;
+}
+
+/** One memory module. SO-DIMMs are short; desktop DDR5 gets a heat spreader. */
+export function makeRamStick(spec) {
+  const g = new THREE.Group();
+  const so = /SO/.test(spec.type);
+  const L = so ? 1.4 : 2.6; const H = so ? 0.6 : 0.62;
+  g.add(box(L, H, 0.03, M.pcbGreen(), 0, H / 2, 0));
+  const chips = /ECC/.test(spec.type) ? 9 : 8;
+  const pos = [];
+  for (let i = 0; i < chips; i++) pos.push([-L / 2 + 0.12 + i * (L - 0.24) / (chips - 1), H * 0.55, 0.03]);
+  g.add(instancedBoxes(Math.min(0.22, (L - 0.3) / chips), H * 0.45, 0.03, M.black(), pos));
+  if (!so && !/ECC/.test(spec.type)) {
+    g.add(box(L * 0.98, H * 0.8, 0.02, M.satin(), 0, H * 0.55, 0.06), box(L * 0.98, H * 0.8, 0.02, M.satin(), 0, H * 0.55, -0.04));
+    if (/DDR5/.test(spec.type)) { const bar = box(L * 0.9, 0.05, 0.1, M.glow('#8b5cf6'), 0, H + 0.03, 0.01); g.add(bar); }
+  }
+  const pins = [];
+  for (let i = 0; i < 30; i++) pins.push([-L / 2 + 0.08 + i * (L - 0.16) / 29, 0.04, 0.018]);
+  g.add(instancedBoxes(0.03, 0.07, 0.005, M.gold(), pins));
+  const t = label(`${spec.gb} GB ${spec.type.replace('-SO', '')}`, L * 0.5, 0.12, { color: '#e6edf7', bg: '#1b2533' });
+  t.position.set(0, H * 0.35, so || /ECC/.test(spec.type) ? 0.05 : 0.075); g.add(t);
+  g.userData = { kind: 'ram', spinners: [], leds: [] };
+  return g;
+}
+
+/** Hard drives, SSDs, NVMe sticks and SAS drives in hot-swap caddies. */
+export function makeDrive(spec, { broken = false } = {}) {
+  const g = new THREE.Group();
+  if (spec.size === 'm2') {
+    g.add(box(1.6, 0.03, 0.44, M.pcb(), 0, 0.015, 0));
+    for (let i = 0; i < (spec.tb >= 4 ? 4 : 2); i++) g.add(box(0.28, 0.04, 0.3, M.black(), -0.5 + i * 0.32, 0.05, 0));
+    g.add(box(0.2, 0.04, 0.24, M.black(), 0.58, 0.05, 0));
+    if (spec.cls === 'ssd' && spec.watts >= 7) g.add(box(1.1, 0.06, 0.4, M.satin(), -0.15, 0.09, 0));
+    const pins = [];
+    for (let i = 0; i < 10; i++) pins.push([0.78, 0.02, -0.18 + i * 0.04]);
+    g.add(instancedBoxes(0.06, 0.005, 0.025, M.gold(), pins));
+    const t = label(spec.name.replace(/ NVMe.*$/, ''), 0.9, 0.14, { color: '#e6edf7' }); t.rotation.x = -Math.PI / 2; t.position.set(-0.15, spec.watts >= 7 ? 0.125 : 0.075, 0); g.add(t);
+  } else if (spec.size === 2.5) {
+    const sas = spec.iface === 'sas';
+    g.add(box(1.0, 0.14, 1.4, sas ? M.aluDark() : M.plastic(spec.cls === 'enterprisessd' ? '#3b4252' : '#1f2937'), 0, 0.07, 0, 0.02));
+    const t = label(`${spec.tb < 1 ? Math.round(spec.tb * 1000) + ' GB' : spec.tb + ' TB'} ${sas ? 'SAS' : 'SSD'}`, 0.8, 0.2, { color: '#e6edf7' });
+    t.rotation.x = -Math.PI / 2; t.position.set(0, 0.145, 0); g.add(t);
+    if (sas) { // hot-swap caddy with a latch
+      g.add(box(1.1, 0.18, 0.12, M.black(), 0, 0.09, 0.76), box(0.9, 0.05, 0.05, M.plastic('#f97316'), 0, 0.12, 0.83));
+    }
+  } else {
+    // 3.5" HDD: cast body, top cover with screws, label, SATA/SAS connector
+    g.add(box(1.46, 0.36, 2.0, M.aluDark(), 0, 0.18, 0, 0.03));
+    g.add(box(1.38, 0.02, 1.9, M.aluDark(), 0, 0.37, 0));
+    const color = { nas: '#b91c1c', surveillance: '#7c3aed', enterprise: '#1e3a8a', desktop: '#0f766e' }[spec.cls] || '#334155';
+    const t = label(spec.name.replace(/ \(.*\)$/, ''), 1.2, 0.5, { color: '#ffffff', bg: color, font: 'bold 44px Inter, system-ui, sans-serif' });
+    t.rotation.x = -Math.PI / 2; t.position.set(0, 0.385, -0.2); g.add(t);
+    const cap = label(`${spec.tb} TB`, 1.2, 0.36, { color: '#e6edf7', bg: '#1b2533' });
+    cap.rotation.x = -Math.PI / 2; cap.position.set(0, 0.385, 0.45); g.add(cap);
+    g.add(box(0.7, 0.12, 0.05, M.black(), 0.2, 0.12, -1.02));
+  }
+  if (broken) g.add(box(0.15, 0.15, 0.15, M.glow('#ff3b3b'), 0, 0.5, 0));
+  g.userData = { kind: 'drive', spinners: [], leds: [] };
+  return g;
+}
+
+export function makeUps(spec) {
+  const g = new THREE.Group();
+  const [w, h, d] = spec.style === 'rack' ? [4.4, 0.9, 2.8] : spec.style === 'tower' ? [1.0, 2.0, 2.2] : [0.9, 1.4, 1.6];
+  g.add(box(w, h, d, M.plastic('#1b1e24'), 0, h / 2, 0, 0.05));
+  const screen = box(Math.min(0.5, w * 0.4), 0.22, 0.02, M.glow('#5ee7ff'), 0, h * 0.72, d / 2 + 0.01);
+  g.add(screen);
+  const led = box(0.07, 0.07, 0.02, M.glow('#33ff88'), w * 0.3, h * 0.72, d / 2 + 0.01); g.add(led);
+  const t = label(spec.name, Math.min(w * 0.9, 1.6), 0.18, { color: '#9fb4d8' }); t.position.set(0, h * 0.45, d / 2 + 0.01); g.add(t);
+  g.userData = { kind: 'ups', spinners: [], leds: [screen, led], blink: [led] };
+  return g;
+}
+
+/** Motherboard on its own: sockets, DIMM slots, M.2 and SATA ports. */
+export function makeBoardModel(spec) {
+  const g = new THREE.Group();
+  const [W, D] = { mitx: [1.7, 1.7], matx: [2.4, 2.4], atx: [2.4, 3.0], eatx: [3.0, 3.3], server: [3.3, 3.3], integrated: [1.4, 1.4] }[spec.form] || [2.4, 3.0];
+  g.add(box(W, 0.04, D, spec.ecc ? M.pcbGreen() : M.pcb(), 0, 0.02, 0));
+  const sockets = Math.max(1, spec.cpuSockets || 1);
+  const sockW = /3647|4189|SP3|SP5/.test(spec.socket) ? 0.7 : 0.5;
+  for (let i = 0; i < sockets; i++) {
+    const x = sockets > 1 ? -W * 0.22 + i * W * 0.44 : -W * 0.1;
+    g.add(box(sockW, 0.06, sockW * 1.2, M.aluDark(), x, 0.07, -D * 0.15), box(sockW * 0.7, 0.02, sockW * 0.85, M.gold(), x, 0.105, -D * 0.15));
+  }
+  const slots = Math.min(16, spec.ramSlots || 2);
+  for (let i = 0; i < slots; i++) {
+    const side = sockets > 1 ? (i % 2 ? 1 : -1) : 1;
+    const x = sockets > 1 ? side * (W * 0.05 + Math.floor(i / 2) * 0.09) : W * 0.12 + i * 0.12;
+    g.add(box(0.06, 0.1, D * 0.42, M.black(), x, 0.07, -D * 0.15));
+  }
+  for (let i = 0; i < Math.min(5, spec.m2 || 0); i++) g.add(box(0.9, 0.03, 0.2, M.satin(), -W * 0.15, 0.06, D * 0.1 + i * 0.28));
+  for (let i = 0; i < Math.min(10, spec.sata || 0); i++) g.add(box(0.12, 0.08, 0.06, M.black(), W / 2 - 0.12, 0.06, D * 0.15 + i * 0.09));
+  g.add(box(0.12, 0.12, 0.45, M.plastic('#f8fafc'), W / 2 - 0.08, 0.08, -D * 0.25));
+  g.add(box(0.3, 0.3, 1.0, M.satin(), -W / 2 + 0.15, 0.17, -D / 2 + 0.6));
+  if (spec.ecc) { const bmc = box(0.25, 0.04, 0.25, M.black(), W * 0.2, 0.06, D * 0.35); g.add(bmc); }
+  g.userData = { kind: 'board', spinners: [], leds: [], size: [W, 0.4, D] };
+  return g;
+}
+
+/**
+ * A whole machine (or an empty case): mini PCs, NAS boxes, towers with a glass side showing
+ * the board, cooler, RAM, GPU and drives, and rack servers with front drive bays.
+ * `parts` = { board, cpus, ram, drives, gpus, psu } as catalog specs (+ broken flags on drives).
+ */
+export function makeMachine(spec, parts = {}, { on = true } = {}) {
+  const g = new THREE.Group();
+  const leds = []; const spinners = [];
+  const drives = parts.drives || [];
+  const ok = (b) => M.glow(b ? '#ff3b3b' : '#33ff88');
+  const style = spec.style;
+  if (style === 'nuc' || style === 'tiny') {
+    const [w, h, d] = style === 'tiny' ? [1.8, 0.36, 1.8] : [1.2, 0.5, 1.2];
+    g.add(box(w, h, d, style === 'tiny' ? M.plastic('#1a1d23') : M.satin(), 0, h / 2, 0, 0.06));
+    g.add(box(w * 0.8, 0.01, d * 0.8, M.black(), 0, h + 0.002, 0));
+    for (let i = 0; i < 2; i++) g.add(box(0.12, 0.05, 0.02, M.black(), -w * 0.25 + i * 0.18, h * 0.5, d / 2 + 0.005));
+    const p = box(0.06, 0.06, 0.02, on ? M.glow('#5ee7ff') : M.black(), w * 0.35, h * 0.5, d / 2 + 0.01); g.add(p); leds.push(p);
+  } else if (style.startsWith('nas')) {
+    const bays = spec.bays35 || 2;
+    const w = 0.42 * bays + 0.5; const h = 1.9; const d = 2.4;
+    g.add(box(w, h, d, M.plastic('#15171c'), 0, h / 2, 0, 0.06));
+    for (let i = 0; i < bays; i++) {
+      const filled = drives.filter((x) => x.size === 3.5)[i];
+      const x = -w / 2 + 0.35 + i * 0.42;
+      g.add(box(0.36, 1.4, 0.04, filled ? M.plastic('#2a2f38') : M.black(), x, 0.95, d / 2 + 0.02));
+      const led = box(0.05, 0.05, 0.02, filled ? ok(filled.broken) : M.black(), x, 1.55, d / 2 + 0.05);
+      g.add(led); if (filled) leds.push(led);
+    }
+    const pwr = box(0.08, 0.08, 0.02, on ? M.glow('#5ee7ff') : M.black(), w / 2 - 0.12, 1.7, d / 2 + 0.03); g.add(pwr); leds.push(pwr);
+    const fan = makeFan(0.55, '#9fb4d8', { frame: 'none', ledRing: false, blades: 7 });
+    fan.rotation.y = Math.PI; fan.position.set(0, 0.95, -d / 2 - 0.02); g.add(fan); spinners.push(fan.userData.spinner);
+  } else if (style.startsWith('rack')) {
+    const U = spec.rackU || 1; const w = 4.4; const h = 0.44 * U; const d = 3.2;
+    g.add(box(w, h, d, M.aluDark(), 0, h / 2, 0, 0.02));
+    g.add(box(0.15, h, 0.08, M.satin(), -w / 2 - 0.05, h / 2, d / 2), box(0.15, h, 0.08, M.satin(), w / 2 + 0.05, h / 2, d / 2));
+    const bays35 = spec.bays35 || 0; const bays25 = spec.bays25 || 0;
+    const total = bays35 + bays25;
+    const per = bays35 ? Math.ceil(bays35 / Math.max(1, U)) : Math.ceil(bays25 / Math.max(1, U === 1 ? 1 : 2));
+    const rows = Math.ceil(total / per);
+    const bw = (w * 0.8) / per; const bh = Math.min(0.4, (h - 0.06) / rows);
+    const frontDrives = drives.filter((x) => x.size !== 'm2');
+    for (let i = 0; i < total; i++) {
+      const r = Math.floor(i / per); const c = i % per;
+      const filled = frontDrives[i];
+      const x = -w * 0.4 + bw / 2 + c * bw; const y = h - 0.03 - bh / 2 - r * bh;
+      g.add(box(bw * 0.9, bh * 0.85, 0.05, filled ? M.black() : M.satin(), x, y, d / 2 + 0.02));
+      if (filled) { const led = box(0.04, 0.04, 0.02, ok(filled.broken), x + bw * 0.35, y, d / 2 + 0.06); g.add(led); leds.push(led); }
+    }
+    const pwr = box(0.08, 0.08, 0.02, on ? M.glow('#5ee7ff') : M.black(), w / 2 - 0.15, h / 2, d / 2 + 0.03); g.add(pwr); leds.push(pwr);
+    const t = label(spec.name.replace(/ \(used\)/, ''), 1.6, 0.16, { color: '#c3cad3' }); t.position.set(w / 2 - 1.1, Math.max(0.12, h - 0.15), d / 2 + 0.03); if (U > 1) g.add(t);
+  } else {
+    // Tower: glass on the +X side so the build is visible
+    const big = style === 'towerBig';
+    const w = 1.2; const h = big ? 3.0 : 2.4; const d = big ? 2.8 : 2.4;
+    const frame = style === 'towerWood' ? M.satin() : M.black();
+    g.add(box(0.05, h, d, M.satin(), -w / 2, h / 2, 0), box(w, 0.05, d, frame, 0, 0.025, 0), box(w, 0.05, d, frame, 0, h - 0.025, 0), box(w, h, 0.05, frame, 0, h / 2, -d / 2));
+    if (style === 'towerWood') {
+      const slats = [];
+      for (let i = 0; i < 8; i++) slats.push([-w / 2 + 0.1 + i * (w - 0.2) / 7, h / 2, d / 2]);
+      g.add(box(w, h, 0.04, M.black(), 0, h / 2, d / 2 - 0.03), instancedBoxes(0.08, h * 0.95, 0.06, M.plastic('#8b5a2b'), slats));
+    } else g.add(box(w, h, 0.05, M.black(), 0, h / 2, d / 2));
+    const glass = box(0.02, h * 0.97, d * 0.97, M.glass(), w / 2, h / 2, 0); g.add(glass);
+    // PSU shroud
+    g.add(box(w - 0.1, 0.5, d - 0.1, M.satin(), 0, 0.3, 0));
+    if (parts.board) {
+      const b = makeBoardModel(parts.board);
+      b.rotation.z = Math.PI / 2; b.position.set(-w / 2 + 0.06, h * 0.55, 0); b.scale.setScalar(Math.min(1, (h - 0.7) / b.userData.size[0], (d - 0.2) / b.userData.size[2]) * 0.9);
+      g.add(b);
+      if ((parts.cpus || []).length) {
+        const cooler = box(0.5, 0.6, 0.6, M.alu(), -w / 2 + 0.35, h * 0.6, -d * 0.08);
+        const fan = makeFan(0.28, '#9fb4d8', { frame: 'square', ledRing: false, blades: 7 });
+        fan.rotation.y = Math.PI / 2; fan.position.set(-w / 2 + 0.66, h * 0.6, -d * 0.08);
+        g.add(cooler, fan); spinners.push(fan.userData.spinner);
+      }
+      (parts.ram || []).slice(0, 4).forEach((r, i) => g.add(box(0.12, 0.05, 0.62, M.plastic('#1e293b'), -w / 2 + 0.16, h * 0.62 + 0.35 + i * 0.07, d * 0.18)));
+    }
+    (parts.gpus || []).slice(0, 2).forEach((gp, i) => {
+      const card = makeGPU(gp, { detail: 'lite' });
+      // Horizontal in the PCIe slot: length front-to-back, fans facing down, bracket at the back.
+      card.rotation.set(Math.PI / 2, Math.PI / 2, 0, 'YXZ');
+      const sc = Math.min(0.62, (d - 0.4) / card.userData.size[0], (w - 0.25) / card.userData.size[1]);
+      card.scale.setScalar(sc);
+      card.position.set(-w / 2 + 0.12 + (card.userData.size[1] * sc) / 2, h * 0.36 + 0.05 - i * 0.22, 0.05);
+      g.add(card); spinners.push(...(card.userData.spinners || []));
+    });
+    // Drive cage at the front, under the shroud line
+    drives.filter((x) => x.size === 3.5).slice(0, big ? 8 : 3).forEach((dv, i) => {
+      g.add(box(0.75, 0.16, 0.6, M.aluDark(), 0, 0.12 + i * 0.2 + (i >= 2 ? h * 0.35 : 0), d / 2 - 0.4));
+    });
+    const fan = makeFan(0.35, '#9fb4d8', { frame: 'square', ledRing: style === 'towerGlass', blades: 7 });
+    fan.position.set(0, h * 0.7, -d / 2 + 0.06); g.add(fan); spinners.push(fan.userData.spinner);
+    const pwr = box(0.06, 0.06, 0.02, on ? M.glow('#5ee7ff') : M.black(), 0.4, h - 0.1, d / 2 + 0.01); g.add(pwr); leds.push(pwr);
+  }
+  g.userData = { kind: 'machine', spinners, leds, blink: leds.slice(0, 1) };
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
 }

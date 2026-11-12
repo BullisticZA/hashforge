@@ -3,6 +3,7 @@
 
 import {
   ALGOS, GPU_ALGOS, GPUS, ASICS, PSUS, LOCATIONS, REGIONS, RISERS, OS, FACILITY, byId,
+  CLIENT_TYPES, DRIVE_CLASS, SERVER_OS,
 } from '../data/catalog.js';
 import {
   QUALITY, QUALITY_ORDER, gradeAt, PART_TYPES, CRAFT_FEE, JUNK_LOTS, UPGRADES,
@@ -11,7 +12,7 @@ import {
 
 export const DAY_HOURS = 24;
 export const BILL_PERIOD_DAYS = 30;
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 const DEVICE_TEMP_OFFSET = 35;  // chips run this much hotter than the room
 const THROTTLE_AT = 75;
 const SHUTDOWN_AT = 95;
@@ -67,7 +68,8 @@ export function newGame(seed = Date.now() % 2147483647, options = {}) {
     location: 'bedroom',
     nextUid: 1,
     inventory: [], parts: [], rigs: [], racks: [], cooling: [],
-    energy: { solar: [], inverters: [], batteries: [], generators: [], gridCharge: true },
+    energy: { solar: [], inverters: [], batteries: [], generators: [], ups: [], gridCharge: true },
+    servers: [], clients: [], offers: [], reputation: 0,
     grid: { stage: 0, stageDaysLeft: 3, outageHours: 0, breakerTripped: false, offline: false, offlineReason: '' },
     market: { index, difficulty, history, regime: 'bull', regimeDaysLeft: 45, halvings: 0 },
     listings: [],
@@ -85,6 +87,7 @@ export function newGame(seed = Date.now() % 2147483647, options = {}) {
     gameOver: false,
   };
   refreshListings(state, true);
+  refreshOffers(state, true);
   addLog(state, 'info', prestige.forks
     ? `Hard Fork #${prestige.forks}: a new era begins. The network is ${Math.round((eraDifficulty(prestige.forks) - 1) * 100)}% harder, but your upgrades carry over.`
     : 'Welcome to HashForge. Buy a rig kit, a PSU and a GPU, or try your luck at the junkyard.');
@@ -320,18 +323,21 @@ export function roomStats(state) {
   const racks = state.racks.map((r) => rackStats(state, r));
   const asics = racks.flatMap((r) => r.miners);
   const minerWatts = [...rigs, ...asics].reduce((s, x) => s + x.wallPower, 0);
+  const servers = (state.servers || []).map((m) => serverStats(state, m));
+  const serverWatts = servers.reduce((s, x) => s + x.wallPower, 0);
+  const heatWatts = minerWatts + serverWatts;
   const coolingUnits = state.cooling.filter((c) => !c.broken).map((c) => byId[c.id]);
   const humidDay = state.weather <= 0.25;   // overcast / rainy: evaporative coolers struggle
   const rawCooling = coolingUnits.reduce((s, c) => s + c.cooling * (c.humid && humidDay ? 0.5 : 1), 0);
   const dustLoss = 1 - 0.35 * (state.dust || 0);
   const containment = state.facility?.[state.location]?.containment ? 1.25 : 1;
   const coolingCapacity = rawCooling * fx.cooling * dustLoss * containment;
-  const coolingWatts = minerWatts > 0 ? coolingUnits.reduce((s, c) => s + c.power, 0) : 0;
-  const demandWatts = minerWatts + coolingWatts;
+  const coolingWatts = heatWatts > 0 ? coolingUnits.reduce((s, c) => s + c.power, 0) : 0;
+  const demandWatts = heatWatts + coolingWatts;
 
   const ambient = loc.ambient + state.mods.ambient;
-  const excess = Math.max(0, minerWatts - coolingCapacity);
-  const roomTemp = ambient + (1.5 * minerWatts / 1000 + 6 * excess / 1000) / loc.roomSize;
+  const excess = Math.max(0, heatWatts - coolingCapacity);
+  const roomTemp = ambient + (1.5 * heatWatts / 1000 + 6 * excess / 1000) / loc.roomSize;
   const deviceTemp = roomTemp + (minerWatts > 0 ? DEVICE_TEMP_OFFSET : 0);
   let throttle = 1;
   if (deviceTemp >= SHUTDOWN_AT) throttle = 0;
@@ -347,7 +353,7 @@ export function roomStats(state) {
     gross += x.grossPerDay * factor;
   }
   return {
-    location: loc, rigs, racks, asics, minerWatts, coolingWatts, demandWatts, coolingCapacity,
+    location: loc, rigs, racks, asics, servers, serverWatts, minerWatts, coolingWatts, demandWatts, coolingCapacity,
     ambient, roomTemp, deviceTemp, throttle, offline, offlineReason: state.grid.offlineReason,
     tripped: state.grid.breakerTripped, circuitPct: demandWatts / (loc.circuitKw * 1000),
     dust: state.dust || 0, containment: containment > 1,
@@ -486,6 +492,11 @@ function place(state, owned) {
       state.energy.solar.push(owned);
       return { ok: true };
     }
+    case 'case':
+      if (state.servers.length >= loc.serverSlots) return fail(`${loc.name} has room for ${loc.serverSlots} machine(s). Move somewhere bigger.`);
+      state.servers.push({ ...owned, on: true, board: null, cpus: [], ram: [], drives: [], psu: null, gpus: [], os: 'linux', raid: false, name: `${item.type === 'nas' ? 'NAS' : item.type === 'nuc' ? 'Mini PC' : item.type === 'rack' ? 'Server' : 'PC'} ${state.servers.length + 1}` });
+      return { ok: true };
+    case 'ups': state.energy.ups.push({ ...owned, charge: item.wh }); return { ok: true };
     case 'inverter': state.energy.inverters.push(owned); return { ok: true };
     case 'battery': state.energy.batteries.push({ ...owned, soc: 0, wear: 0 }); return { ok: true };
     case 'generator': state.energy.generators.push(owned); return { ok: true };
@@ -678,8 +689,13 @@ export function sellPart(state, partUid) {
 // ------------------------------------------------------------------ rigs & maintenance
 
 function findOwned(state, itemUid) {
-  const lists = [state.inventory, state.cooling, state.energy.solar, state.energy.inverters, state.energy.batteries, state.energy.generators,
-    ...state.rigs.flatMap((r) => [r.gpus, r.psus, r.risers || []]), ...state.racks.map((r) => r.asics)];
+  const lists = [state.inventory, state.cooling, state.energy.solar, state.energy.inverters, state.energy.batteries, state.energy.generators, state.energy.ups || [],
+    ...state.rigs.flatMap((r) => [r.gpus, r.psus, r.risers || []]), ...state.racks.map((r) => r.asics),
+    ...(state.servers || []).flatMap((m) => [m.cpus, m.ram, m.drives, m.gpus || []])];
+  for (const m of state.servers || []) {
+    if (m.board?.uid === itemUid) return { list: null, owned: m.board, server: m };
+    if (m.psu?.uid === itemUid) return { list: null, owned: m.psu, server: m };
+  }
   for (const rig of state.rigs) {
     if (rig.boot?.uid === itemUid) return { list: null, owned: rig.boot, rig };
   }
@@ -874,8 +890,20 @@ export function sell(state, itemUid) {
     state.cash += value;
     return { ok: true, value };
   }
+  const si = (state.servers || []).findIndex((m) => m.uid === itemUid);
+  if (si !== -1) {
+    const m = state.servers[si];
+    if (state.clients.some((c) => c.serverUid === m.uid)) return fail('Clients are hosted on this machine. Move or end their contracts first.');
+    const parts = [m, m.board, m.psu, ...m.cpus, ...m.ram, ...m.drives, ...(m.gpus || [])].filter(Boolean);
+    const value = parts.reduce((t, o) => t + sellValue(state, o), 0);
+    state.servers.splice(si, 1);
+    state.cash += value;
+    addLog(state, 'sell', `Sold ${m.name} with everything in it for {{usd:${value}}}.`);
+    return { ok: true, value };
+  }
   const found = findOwned(state, itemUid);
   if (!found) return fail('Item not found');
+  if (found.server || (state.servers || []).some((m) => [m.cpus, m.ram, m.drives, m.gpus || []].some((l) => l.includes(found.owned)))) return fail('Remove it from the machine first.');
   if (found.owned.asics?.length) return fail('Move or sell the miners in this rack first.');
   if (!found.list || state.rigs.some((r) => r.gpus.includes(found.owned) || r.psus.includes(found.owned) || (r.risers || []).includes(found.owned))) return fail('Uninstall it from the rig first.');
   found.list.splice(found.index, 1);
@@ -1147,6 +1175,7 @@ export function advance(state, hours) {
     }
 
     const online = !state.grid.offline;
+    hostingHour(state, !online);
     const gross = online ? room.grossPerDay / DAY_HOURS : 0;
     const t = tariffUsd(state) * tariffHourMult(state);
     const gridKwh = online ? flow.gridKwh : (flow.gridUp ? flow.gridKwh - demandKw : 0);
@@ -1179,6 +1208,7 @@ export function advance(state, hours) {
       const filters = state.facility?.[state.location]?.filters ? 0.4 : 1;
       if (room.minerWatts > 0) state.dust = Math.min(1, (state.dust || 0) + 0.006 * filters * Math.min(3, 1 + room.minerWatts / 5000));
       refreshListings(state);
+      hostingDay(state, room);
       if (state.day - state.power.lastBillDay >= BILL_PERIOD_DAYS) payBill(state);
       const worth = netWorth(state);
       if (worth > state.prestige.bestNetWorth) state.prestige.bestNetWorth = worth;
@@ -1186,11 +1216,418 @@ export function advance(state, hours) {
   }
 }
 
+// ------------------------------------------------------------------ servers, PCs and NAS
+
+const CLIENT_FIRST = ['Karoo', 'Fynbos', 'Baobab', 'Protea', 'Highveld', 'Kloof', 'Mopane', 'Marula', 'Jacaranda', 'Acacia', 'Sunbird', 'Blue Crane', 'Bay', 'Mountain', 'Riverside', 'Lowveld', 'Silverleaf', 'Ironwood', 'Coral', 'Northgate'];
+const CLIENT_LAST = ['Dental', 'Bakery', 'Motors', 'Attorneys', 'Guesthouse', 'Accounting', 'Studios', 'Logistics', 'Pharmacy', 'Hardware', 'Fitness', 'Coffee Co.', 'Print Shop', 'Vet Clinic', 'Architects', 'Software', 'Gaming Club', 'Spares', 'Realty', 'Clinic'];
+
+/** The board in a machine: built into the case, or the motherboard the player installed. */
+export function serverBoard(m) {
+  const spec = byId[m.id];
+  return spec.board || (m.board ? byId[m.board.id] : null);
+}
+
+/** Everything about one machine: capacity, power, health and what's left for new clients. */
+export function serverStats(state, m) {
+  const spec = byId[m.id];
+  const board = serverBoard(m);
+  const integratedCpu = board?.form === 'integrated';
+  const cpus = m.cpus.map((c) => byId[c.id]);
+  const vcpu = integratedCpu ? board.threads : cpus.reduce((s, c) => s + c.threads, 0);
+  const ramGB = (board?.ramBuiltin || 0) + m.ram.reduce((s, r) => s + byId[r.id].gb, 0);
+  const drives = m.drives.map((d) => ({ owned: d, spec: byId[d.id] }));
+  const working = drives.filter((d) => !d.owned.broken);
+  const failed = drives.length - working.length;
+  const raid = !!m.raid && drives.length >= 2;
+  const rawTb = drives.reduce((s, d) => s + d.spec.tb, 0);
+  const largest = drives.reduce((mx, d) => Math.max(mx, d.spec.tb), 0);
+  const usableTb = raid ? rawTb - largest : rawTb;
+  const share = rawTb ? usableTb / rawTb : 0;
+  const tbByClass = {};
+  for (const d of drives) tbByClass[d.spec.cls] = (tbByClass[d.spec.cls] || 0) + d.spec.tb * share;
+  const gpus = (m.gpus || []).filter((g) => !g.broken).map((g) => byId[g.id]);
+  const gpuVram = gpus.reduce((mx, g) => Math.max(mx, g.vram), 0);
+  const psuSpec = spec.psu || (m.psu && !m.psu.broken ? { watts: byId[m.psu.id].watts, efficiency: byId[m.psu.id].efficiency } : null);
+
+  // Power: board, CPUs at a typical hosting load, memory, drives and any GPUs.
+  const clients = (state.clients || []).filter((c) => c.serverUid === m.uid);
+  const used = clients.reduce((u, c) => ({ vcpu: u.vcpu + c.needs.vcpu, ramGB: u.ramGB + c.needs.ramGB, tb: u.tb + c.needs.tb }), { vcpu: 0, ramGB: 0, tb: 0 });
+  const load = vcpu ? Math.min(1, 0.25 + 0.75 * used.vcpu / vcpu) : 0;
+  const boardW = !board ? 0 : integratedCpu ? 6 : board.form === 'server' || board.cpuSockets > 1 ? 55 : 25;
+  const cpuW = integratedCpu ? board.cpuW * (0.4 + 0.6 * load) : cpus.reduce((s, c) => s + c.watts * (0.3 + 0.6 * load), 0);
+  const ramW = m.ram.length * (board?.ecc ? 5 : 3);
+  const driveW = working.reduce((s, d) => s + d.spec.watts, 0);
+  const gpuW = gpus.reduce((s, g) => s + g.power * (clients.some((c) => c.needs.gpuVram) ? 0.8 : 0.1), 0);
+  const fansW = spec.type === 'rack' ? 25 * (spec.rackU || 1) : spec.type === 'tower' ? 8 : 2;
+  const dcWatts = boardW + cpuW + ramW + driveW + gpuW + fansW;
+
+  let status = 'running';
+  if (!m.on) status = 'off';
+  else if (!board) status = 'no-board';
+  else if (!integratedCpu && !cpus.length) status = 'no-cpu';
+  else if (!ramGB) status = 'no-ram';
+  else if (!drives.length) status = 'no-drive';
+  else if (!psuSpec) status = m.psu?.broken ? 'psu-dead' : 'no-psu';
+  else if (dcWatts > psuSpec.watts) status = 'overloaded';
+  else if (failed && (!raid || failed > 1)) status = 'data-loss';
+  else if (failed) status = 'degraded';
+  const running = status === 'running' || status === 'degraded';
+  const wall = running ? dcWatts / (psuSpec?.efficiency || 0.9) : 0;
+  return {
+    spec, board, vcpu, ramGB, rawTb, usableTb, tbByClass, gpuVram, ecc: !!board?.ecc, raid, failed,
+    dcWatts, wallPower: wall, psuWatts: psuSpec?.watts || 0, status, running, clients, used,
+    free: { vcpu: vcpu - used.vcpu, ramGB: ramGB - used.ramGB, tb: usableTb - used.tb },
+    payPerDay: clients.reduce((s, c) => s + c.payMonthly / 30, 0),
+  };
+}
+
+export const SERVER_STATUS = {
+  running: 'Running', degraded: 'Degraded: a drive failed (data still safe)', off: 'Switched off', 'no-board': 'Needs a motherboard',
+  'no-cpu': 'Needs a CPU', 'no-ram': 'Needs memory', 'no-drive': 'Needs a drive', 'no-psu': 'Needs a power supply',
+  'psu-dead': 'Power supply failed', overloaded: 'Power supply too small', 'data-loss': 'Drive failed: data lost',
+};
+
+/** Install a part from inventory into a machine, checking that it fits. */
+export function installServerPart(state, serverUid, itemUid) {
+  const m = state.servers.find((x) => x.uid === serverUid);
+  if (!m) return fail('Machine not found');
+  const o = state.inventory.find((x) => x.uid === itemUid);
+  if (!o) return fail('Part not in inventory');
+  const why = serverPartProblem(m, byId[o.id]);
+  if (why) return fail(why);
+  const part = byId[o.id];
+  state.inventory.splice(state.inventory.indexOf(o), 1);
+  if (part.kind === 'board') m.board = o;
+  else if (part.kind === 'psu') m.psu = o;
+  else if (part.kind === 'cpu') m.cpus.push(o);
+  else if (part.kind === 'ram') m.ram.push(o);
+  else if (part.kind === 'drive') m.drives.push(o);
+  else if (part.kind === 'gpu') (m.gpus = m.gpus || []).push(o);
+  return { ok: true };
+}
+
+/** Why a catalog part can't go into a machine right now (null if it fits). */
+export function serverPartProblem(m, part) {
+  const spec = byId[m.id];
+  const board = serverBoard(m);
+  const reject = (msg) => msg;
+  switch (part.kind) {
+    case 'board':
+      if (spec.board) return reject(`${spec.name} has its own board.`);
+      if (m.board) return reject('Remove the current motherboard first.');
+      if (!spec.forms.includes(part.form)) return reject(`${part.name} (${part.form.toUpperCase()}) doesn't fit a ${spec.name}.`);
+      if (m.cpus.length || m.ram.length) return reject('Remove the CPU and RAM first.');
+      break;
+    case 'cpu':
+      if (!board) return reject('Fit a motherboard first.');
+      if (board.form === 'integrated') return reject(`${spec.name} has a built-in ${board.cpu}.`);
+      if (board.socket !== part.socket) return reject(`${part.name} needs socket ${part.socket}; this board is ${board.socket}.`);
+      if (m.cpus.length >= board.cpuSockets) return reject('Every CPU socket is full.');
+      if (m.cpus.length && m.cpus[0].id !== part.id) return reject('Dual-socket boards need two identical CPUs.');
+      break;
+    case 'ram':
+      if (!board) return reject('Fit a motherboard first.');
+      if (board.ramType !== part.type) return reject(`This board takes ${board.ramType} memory, not ${part.type}.`);
+      if (m.ram.length >= board.ramSlots) return reject('Every memory slot is full.');
+      if ((board.ramBuiltin || 0) + m.ram.reduce((s, r) => s + byId[r.id].gb, 0) + part.gb > board.maxRam) return reject(`This board supports up to ${board.maxRam} GB.`);
+      break;
+    case 'drive': {
+      if (part.iface === 'nvme') {
+        const used = m.drives.filter((d) => byId[d.id].iface === 'nvme').length;
+        if (!board) return reject('Fit a motherboard first.');
+        if (used >= (board.m2 || 0)) return reject('No free M.2 slot.');
+        break;
+      }
+      if (part.iface === 'sas' && !spec.sas) return reject('SAS drives need a server chassis with a SAS backplane.');
+      const bays = m.drives.filter((d) => byId[d.id].iface !== 'nvme');
+      // 3.5" drives need 3.5" bays; 2.5" drives use 2.5" bays first, then spill into 3.5" bays.
+      const big = bays.filter((d) => byId[d.id].size === 3.5).length + (part.size === 3.5 ? 1 : 0);
+      const small = bays.length + 1 - big;
+      const b35 = spec.bays35 || 0; const b25 = spec.bays25 || 0;
+      if (big > b35 || big + Math.max(0, small - b25) > b35) return reject(part.size === 3.5 && !b35 ? `${spec.name} only has 2.5" bays.` : 'No free drive bay.');
+      if (!spec.sas && board && board.form !== 'integrated' && bays.length >= (board.sata || 0)) return reject('No free SATA port on the board.');
+      break;
+    }
+    case 'psu':
+      if (spec.psu) return reject(`${spec.name} has its own power supply.`);
+      if (m.psu) return reject('Remove the current PSU first.');
+      break;
+    case 'gpu':
+      if ((m.gpus || []).length >= (spec.gpuSlots || 0)) return reject(spec.gpuSlots ? 'No free GPU slot.' : `${spec.name} has no room for a graphics card.`);
+      break;
+    default: return reject(`${part.name} doesn't go in a server.`);
+  }
+  return null;
+}
+
+export function removeServerPart(state, serverUid, itemUid) {
+  const m = state.servers.find((x) => x.uid === serverUid);
+  if (!m) return fail('Machine not found');
+  const hasClients = state.clients.some((c) => c.serverUid === m.uid);
+  const take = (o) => { state.inventory.push(o); return { ok: true }; };
+  if (m.board?.uid === itemUid) {
+    if (m.cpus.length || m.ram.length) return fail('Remove the CPU and RAM first.');
+    const o = m.board; m.board = null; return take(o);
+  }
+  if (m.psu?.uid === itemUid) { const o = m.psu; m.psu = null; return take(o); }
+  for (const key of ['cpus', 'ram', 'drives', 'gpus']) {
+    const list = m[key] || [];
+    const i = list.findIndex((x) => x.uid === itemUid);
+    if (i === -1) continue;
+    const o = list[i];
+    if (hasClients && !o.broken) {
+      // Pulling a working part out from under paying clients only if what's left still covers them.
+      const copy = { ...m, [key]: list.filter((x) => x !== o) };
+      const st = serverStats(state, copy);
+      if (st.free.vcpu < 0 || st.free.ramGB < 0 || st.free.tb < 0 || !st.running) return fail('Clients are using this machine. Move or end their contracts first.');
+    }
+    list.splice(i, 1);
+    if (key === 'drives' && o.broken && m.raid && m.drives.every((d) => !d.broken)) m.rebuildNeeded = true;
+    return take(o);
+  }
+  return fail('Part not in this machine');
+}
+
+/** Fill a machine from inventory: board, CPUs, memory, drives and PSU that fit, best first. */
+export function autoFillServer(state, serverUid) {
+  const m = state.servers.find((x) => x.uid === serverUid);
+  if (!m) return fail('Machine not found');
+  let added = 0;
+  const tryAll = (kind, sort) => {
+    const items = state.inventory.filter((x) => byId[x.id].kind === kind && !x.broken).sort(sort);
+    for (const o of items) if (installServerPart(state, serverUid, o.uid).ok) added++;
+  };
+  tryAll('board', (a, b) => byId[b.id].price - byId[a.id].price);
+  tryAll('cpu', (a, b) => byId[b.id].threads - byId[a.id].threads);
+  tryAll('ram', (a, b) => byId[b.id].gb - byId[a.id].gb);
+  tryAll('drive', (a, b) => DRIVE_CLASS[byId[a.id].cls].fail - DRIVE_CLASS[byId[b.id].cls].fail || byId[b.id].tb - byId[a.id].tb);
+  tryAll('psu', (a, b) => byId[b.id].watts - byId[a.id].watts);
+  if (!added) return fail('Nothing in your inventory fits this machine.');
+  return { ok: true, added };
+}
+
+export function setServerOs(state, serverUid, os) {
+  const m = state.servers.find((x) => x.uid === serverUid);
+  if (!m || !SERVER_OS[os]) return fail('Invalid');
+  if (state.clients.some((c) => c.serverUid === m.uid && c.needs.os && c.needs.os !== os)) return fail('A client on this machine needs the current OS.');
+  if (os === 'windows' && !m.windowsLicensed) {
+    const cost = SERVER_OS.windows.licence;
+    if (state.cash < cost) return fail('Not enough cash for the Windows Server licence.');
+    state.cash -= cost; m.windowsLicensed = true;
+    addLog(state, 'buy', `Bought a Windows Server licence for ${m.name}: {{usd:${cost}}}.`);
+  }
+  m.os = os;
+  return { ok: true };
+}
+
+export function setRaid(state, serverUid, on) {
+  const m = state.servers.find((x) => x.uid === serverUid);
+  if (!m) return fail('Machine not found');
+  if (state.clients.some((c) => c.serverUid === m.uid)) return fail('Rebuilding the array wipes it. Move or end client contracts first.');
+  if (on && m.drives.length < 2) return fail('Protection needs at least two drives.');
+  m.raid = !!on;
+  return { ok: true };
+}
+
+export function renameServer(state, serverUid, name) {
+  const m = state.servers.find((x) => x.uid === serverUid);
+  if (!m || !name?.trim()) return fail('Invalid');
+  m.name = name.trim().slice(0, 24);
+  return { ok: true };
+}
+
+// ------------------------------------------------------------------ hosting clients
+
+export function reputationTier(rep) {
+  return rep >= 70 ? 'Trusted partner' : rep >= 45 ? 'Established' : rep >= 20 ? 'Growing' : rep >= 5 ? 'Known locally' : 'Unknown';
+}
+
+/** Why a machine can't take a client (or null if it can). */
+export function fitProblem(state, m, needs, stats = serverStats(state, m)) {
+  if (!stats.running) return SERVER_STATUS[stats.status];
+  if (stats.free.vcpu < needs.vcpu) return `needs ${needs.vcpu} CPU threads (${Math.max(0, stats.free.vcpu)} free)`;
+  if (stats.free.ramGB < needs.ramGB) return `needs ${needs.ramGB} GB RAM (${Math.max(0, stats.free.ramGB)} free)`;
+  if (stats.free.tb < needs.tb - 1e-9) return `needs ${fmtTb(needs.tb)} storage (${fmtTb(Math.max(0, stats.free.tb))} free)`;
+  if (needs.cls) {
+    const usedCls = stats.clients.filter((c) => c.needs.cls === needs.cls).reduce((s, c) => s + c.needs.tb, 0);
+    if ((stats.tbByClass[needs.cls] || 0) - usedCls < needs.tb - 1e-9) return `needs ${fmtTb(needs.tb)} on ${DRIVE_CLASS[needs.cls].name.toLowerCase()} drives`;
+  }
+  if (needs.raid && !stats.raid) return 'needs protected storage (turn on drive protection)';
+  if (needs.ecc && !stats.ecc) return 'needs a server with ECC memory';
+  if (needs.gpuVram && stats.gpuVram < needs.gpuVram) return `needs a GPU with ${needs.gpuVram} GB+ VRAM`;
+  if (needs.os && (m.os || 'linux') !== needs.os) return `needs ${SERVER_OS[needs.os].name}`;
+  return null;
+}
+export const fmtTb = (tb) => (tb < 1 ? `${Math.round(tb * 1000)} GB` : `${+tb.toFixed(1)} TB`);
+
+function makeOffer(state) {
+  const rep = state.reputation || 0;
+  const pool = CLIENT_TYPES.filter((t) => t.minRep <= rep);
+  // Better reputation brings bigger clients more often.
+  const t = pool[Math.min(pool.length - 1, Math.floor(Math.pow(rng(state), 0.8) * pool.length))];
+  let tb = t.tb || 0; let pay = t.pay; let detail = '';
+  if (t.tbRange) { tb = Math.round(t.tbRange[0] + rng(state) * (t.tbRange[1] - t.tbRange[0])); pay += tb * t.payPerTb; detail = `${tb} TB`; }
+  if (t.camRange) {
+    const cams = t.camRange[0] + Math.floor(rng(state) * (t.camRange[1] - t.camRange[0] + 1));
+    tb = +(cams * t.tbPerCam).toFixed(1); pay += cams * t.payPerCam; detail = `${cams} cameras`;
+  }
+  const months = t.months[0] + Math.floor(rng(state) * (t.months[1] - t.months[0] + 1));
+  pay = Math.round(pay * (0.85 + rng(state) * 0.35) * (1 + rep / 200));
+  return {
+    id: `O${newUid(state)}`, typeId: t.id, client: `${pick(state, CLIENT_FIRST)} ${pick(state, CLIENT_LAST)}`, detail,
+    needs: { vcpu: t.vcpu, ramGB: t.ramGB, tb, cls: t.cls || null, raid: !!t.raid, ecc: !!t.ecc, gpuVram: t.gpuVram || 0, os: t.os || null },
+    payMonthly: pay, sla: t.sla, months, expires: state.day + 3 + Math.floor(rng(state) * 5),
+  };
+}
+
+export function refreshOffers(state, full = false) {
+  state.offers = (state.offers || []).filter((o) => !full && o.expires > state.day);
+  const want = 4 + Math.min(4, Math.floor((state.reputation || 0) / 20));
+  while (state.offers.length < want) state.offers.push(makeOffer(state));
+}
+
+/** Sign a client onto a machine (the best-fitting one if none is given). */
+export function acceptOffer(state, offerId, serverUid) {
+  const i = (state.offers || []).findIndex((o) => o.id === offerId);
+  if (i === -1) return fail('That client has gone elsewhere.');
+  const offer = state.offers[i];
+  let m = serverUid ? state.servers.find((x) => x.uid === serverUid) : null;
+  if (!m) {
+    const candidates = state.servers.map((x) => ({ x, st: serverStats(state, x) })).filter(({ x, st }) => !fitProblem(state, x, offer.needs, st));
+    candidates.sort((a, b) => a.st.free.vcpu - b.st.free.vcpu);   // pack tightly, keep big machines free for big clients
+    m = candidates[0]?.x;
+    if (!m) return fail(state.servers.length ? `No machine can take this client: ${fitProblem(state, state.servers[0], offer.needs)}.` : 'Build a server, PC or NAS first.');
+  } else {
+    const why = fitProblem(state, m, offer.needs);
+    if (why) return fail(`${m.name} ${why}.`);
+  }
+  state.offers.splice(i, 1);
+  const client = { ...offer, id: `C${newUid(state)}`, serverUid: m.uid, startDay: state.day, endDay: state.day + offer.months * 30, satisfaction: 0.8, upToday: 0, hoursToday: 0, paid: 0 };
+  state.clients.push(client);
+  addLog(state, 'milestone', `New client: ${client.client} (${CLIENT_TYPES.find((t) => t.id === client.typeId).name}) on ${m.name}. {{usd:${client.payMonthly}}}/month.`);
+  return { ok: true, client };
+}
+
+export function endContract(state, clientId) {
+  const i = state.clients.findIndex((c) => c.id === clientId);
+  if (i === -1) return fail('Client not found');
+  const c = state.clients.splice(i, 1)[0];
+  state.reputation = Math.max(0, (state.reputation || 0) - 3);
+  addLog(state, 'warning', `You ended ${c.client}'s contract early. Reputation -3.`);
+  return { ok: true };
+}
+
+/** Move a client to another machine (a few hours of downtime are part of the move). */
+export function moveClient(state, clientId, serverUid) {
+  const c = state.clients.find((x) => x.id === clientId);
+  const m = state.servers.find((x) => x.uid === serverUid);
+  if (!c || !m) return fail('Not found');
+  if (c.serverUid === m.uid) return fail('Already there.');
+  const why = fitProblem(state, m, c.needs);
+  if (why) return fail(`${m.name} ${why}.`);
+  c.serverUid = m.uid;
+  c.upToday = Math.max(0, c.upToday - 2);
+  addLog(state, 'info', `Migrated ${c.client} to ${m.name}.`);
+  return { ok: true };
+}
+
+/** Hosting income per day across all clients. */
+export const hostingPerDay = (state) => (state.clients || []).reduce((s, c) => s + c.payMonthly / 30, 0);
+
+function lostData(state, m) {
+  const gone = state.clients.filter((c) => c.serverUid === m.uid);
+  if (!gone.length) return;
+  state.clients = state.clients.filter((c) => c.serverUid !== m.uid);
+  state.reputation = Math.max(0, (state.reputation || 0) - 10 * gone.length);
+  addLog(state, 'warning', `💥 Data lost on ${m.name}: ${gone.map((c) => c.client).join(', ')} left. Reputation -${10 * gone.length}. Turn on drive protection and use NAS or enterprise drives.`);
+}
+
+/** One hour of hosting: which machines stay up (UPS can carry them through an outage). */
+function hostingHour(state, gridDown) {
+  if (!state.servers?.length) return;
+  const stats = state.servers.map((m) => ({ m, st: serverStats(state, m) }));
+  const load = stats.filter((x) => x.st.running).reduce((s, x) => s + x.st.wallPower, 0);
+  let up = !gridDown;
+  const upses = state.energy.ups || [];
+  if (gridDown && load > 0) {
+    const stored = upses.reduce((s, u) => s + u.charge, 0);
+    const maxW = upses.reduce((s, u) => s + byId[u.id].maxW, 0);
+    if (stored >= load && maxW >= load) {
+      up = true;
+      let need = load;
+      for (const u of upses) { const take = Math.min(u.charge, need); u.charge -= take; need -= take; }
+    }
+  } else if (!gridDown) {
+    for (const u of upses) u.charge = Math.min(byId[u.id].wh, u.charge + byId[u.id].wh * 0.25);
+  }
+  state.hostingUp = up;
+  for (const c of state.clients) {
+    const x = stats.find((s) => s.m.uid === c.serverUid);
+    c.hoursToday += 1;
+    if (up && x?.st.running) c.upToday += 1;
+  }
+}
+
+/** End of a day: pay clients by uptime, update satisfaction and reputation, wear drives, renewals. */
+function hostingDay(state, room) {
+  const heat = Math.max(0, (room.roomTemp - 30) / 15);
+  for (const m of state.servers) {
+    const st = serverStats(state, m);
+    if (!st.running && st.status !== 'data-loss') continue;
+    for (const d of m.drives) {
+      if (d.broken) continue;
+      const spec = byId[d.id];
+      if (rng(state) < 0.00025 * DRIVE_CLASS[spec.cls].fail * (1 + heat) * effects(state).wear) {
+        d.broken = true;
+        const after = serverStats(state, m);
+        if (after.status === 'data-loss') lostData(state, m);
+        else addLog(state, 'warning', `A drive failed in ${m.name} (${spec.name}). The array is degraded: replace it before another one goes.`);
+      }
+    }
+  }
+  let earned = 0; let repGain = 0;
+  for (const c of [...state.clients]) {
+    const frac = c.hoursToday ? c.upToday / c.hoursToday : 1;
+    const pay = (c.payMonthly / 30) * (frac >= c.sla ? 1 : frac * 0.8);
+    earned += pay; c.paid += pay;
+    if (frac >= c.sla) {
+      c.satisfaction = Math.min(1, c.satisfaction + 0.02);
+      repGain += 0.012;
+    } else {
+      c.satisfaction -= Math.min(0.2, (c.sla - frac) * 0.8);
+      if (c.downDayLogged !== Math.floor(state.day)) {
+        c.downDayLogged = Math.floor(state.day);
+        addLog(state, 'outage', `${c.client} had ${c.hoursToday - c.upToday} h downtime (SLA ${Math.round(c.sla * 100)}%). They're getting unhappy.`);
+      }
+    }
+    c.upToday = 0; c.hoursToday = 0;
+    if (c.satisfaction < 0.3) {
+      state.clients.splice(state.clients.indexOf(c), 1);
+      state.reputation = Math.max(0, (state.reputation || 0) - 4);
+      addLog(state, 'warning', `${c.client} cancelled: too much downtime. Reputation -4. A UPS or inverter keeps servers up during load-shedding.`);
+    } else if (state.day >= c.endDay) {
+      if (c.satisfaction >= 0.6) {
+        c.endDay = state.day + c.months * 30;
+        state.reputation = Math.min(100, (state.reputation || 0) + 1);
+        addLog(state, 'milestone', `${c.client} renewed for ${c.months} months. Reputation +1.`);
+      } else {
+        state.clients.splice(state.clients.indexOf(c), 1);
+        addLog(state, 'info', `${c.client}'s contract ended and they didn't renew.`);
+      }
+    }
+  }
+  state.reputation = Math.min(100, (state.reputation || 0) + Math.min(0.08, repGain));
+  state.cash += earned;
+  state.stats.hostingUsd = (state.stats.hostingUsd || 0) + earned;
+  state.stats.earnedToday += earned;
+  refreshOffers(state);
+}
+
 // ------------------------------------------------------------------ goals
 
 /** Net profit per day if the grid stays up: what the player's operation is really worth per day. */
 export function profitPerDay(state, room = roomStats(state)) {
-  return room.potentialGrossPerDay - room.demandWatts / 1000 * DAY_HOURS * tariffUsd(state);
+  return room.potentialGrossPerDay + hostingPerDay(state) - room.demandWatts / 1000 * DAY_HOURS * tariffUsd(state);
 }
 
 /** A guided path through the early game, then endless profit milestones. Rewards are in USD. */
@@ -1203,6 +1640,8 @@ export const GOALS = [
   { id: 'profit5', title: 'Make {{usd:5}} a day after power', hint: 'Add more efficient cards. Cards that lose money at your tariff do more harm than good.', reward: 75, progress: (s, room) => Math.max(0, Math.min(1, profitPerDay(s, room) / 5)) },
   { id: 'junk', title: 'Open a junkyard lot', hint: 'Cheap bins hide parts and the odd golden sample.', reward: 20, progress: (s) => +(s.stats.lotsOpened > 0) },
   { id: 'craft', title: 'Build a card on the Workbench', hint: 'Match a core with memory, a PCB and a cooler from junkyard parts.', reward: 75, progress: (s) => +(s.stats.crafted > 0) },
+  { id: 'server', title: 'Build a server, PC or NAS', hint: 'Vendors → PCs & servers. A used mini PC with RAM and an NVMe drive is the cheapest start.', reward: 60, progress: (s) => +(s.servers || []).some((m) => serverStats(s, m).running) },
+  { id: 'client', title: 'Sign your first hosting client', hint: 'Clients → pick an offer your machine can handle. Small websites need very little.', reward: 80, progress: (s) => +((s.clients || []).length > 0) },
   { id: 'fullrig', title: 'Fill every GPU slot in a rig', hint: 'Use Auto-fill on the Floor once you have enough cards.', reward: 100, progress: (s) => Math.max(0, ...s.rigs.map((r) => r.gpus.length / byId[r.frameId].slots)) },
   { id: 'backup', title: 'Ride out load-shedding', hint: 'An inverter plus batteries keeps miners running when the grid goes down.', reward: 150, progress: (s) => {
     const cap = energyCapacity(s); return (cap.inverterKw > 0 ? 0.5 : 0) + (cap.batteryKwh > 0 || cap.generatorKw > 0 ? 0.5 : 0);
@@ -1210,6 +1649,8 @@ export const GOALS = [
   { id: 'profit25', title: 'Make {{usd:25}} a day after power', hint: 'More rigs, better cards, or a second-hand ASIC.', reward: 250, progress: (s, room) => Math.max(0, Math.min(1, profitPerDay(s, room) / 25)) },
   { id: 'asic', title: 'Run an ASIC miner', hint: 'ASICs need a rack. Older models are cheap but need cheap power.', reward: 150, progress: (s, room) => +room.racks.some((r) => r.miners.some((m) => m.running)) },
   { id: 'move', title: 'Move out of the bedroom', hint: 'Vendors → Locations. Bigger places mean more circuits, more slots and cheaper power.', reward: 300, progress: (s) => +(LOCATIONS.findIndex((l) => l.id === s.location) > 0) },
+  { id: 'ups', title: 'Keep clients online through load-shedding', hint: 'A UPS carries your servers through outages so clients stay happy.', reward: 150, progress: (s) => +((s.energy.ups || []).length > 0 && (s.clients || []).length > 0) },
+  { id: 'rep20', title: 'Reach reputation 20 with clients', hint: 'Happy clients with full uptime build your name. Bigger clients follow.', reward: 400, progress: (s) => Math.min(1, (s.reputation || 0) / 20) },
   { id: 'solar', title: 'Install solar panels', hint: 'Panels need an inverter. They cut your daytime bill and charge batteries.', reward: 300, progress: (s) => +(s.energy.solar.length > 0) },
   { id: 'profit100', title: 'Make {{usd:100}} a day after power', hint: 'Scale up: racks of ASICs, full rigs and cheap power.', reward: 750, progress: (s, room) => Math.max(0, Math.min(1, profitPerDay(s, room) / 100)) },
 ];
@@ -1235,14 +1676,22 @@ export function checkGoals(state, room = roomStats(state)) {
     state.goals = { done: GOALS.filter((x) => x.progress(state, room) >= 1).map((x) => x.id), tier: 0 };
   }
   const finished = [];
-  for (let guard = 0; guard < 40; guard++) {
-    const goal = currentGoal(state, room);
-    if (goal.value < 1) break;
-    if (goal.endless) state.goals.tier = (state.goals.tier || 0) + 1;
-    else state.goals.done.push(goal.id);
+  const pay = (goal) => {
     state.cash += goal.reward;
     addLog(state, 'milestone', `Goal complete: ${goal.title}. Reward {{usd:${goal.reward}}}.`);
     finished.push(goal);
+  };
+  // Guided goals count whenever you reach them, in any order (a server-first player still gets the rig goals later).
+  for (const goal of GOALS) {
+    if (state.goals.done.includes(goal.id) || goal.progress(state, room) < 1) continue;
+    state.goals.done.push(goal.id);
+    pay(goal);
+  }
+  for (let guard = 0; guard < 20; guard++) {
+    const goal = currentGoal(state, room);
+    if (!goal.endless || goal.value < 1) break;
+    state.goals.tier = (state.goals.tier || 0) + 1;
+    pay(goal);
   }
   return finished;
 }
@@ -1317,6 +1766,21 @@ export function advise(state) {
       if (m.grossPerDay < cost) add('warning', `${byId[state.racks[i].asics[j].id].name} loses money at your tariff. Old ASICs need cheap power.`);
     });
   });
+  (room.servers || []).forEach((st, i) => {
+    const m = state.servers[i];
+    if (st.status === 'degraded') add('critical', `${m.name} lost a drive. Replace it now: one more failure and your clients' data is gone.`);
+    else if (st.status === 'data-loss') add('critical', `${m.name} has a dead drive. Remove it and fit a new one.`);
+    else if (!st.running && st.status !== 'off') add('warning', `${m.name}: ${SERVER_STATUS[st.status].toLowerCase()}.`);
+    if (st.running && st.clients.length && !st.raid && m.drives.length >= 2) add('info', `${m.name} hosts clients on unprotected drives. One dead drive loses their data.`);
+  });
+  const unhappy = (state.clients || []).filter((c) => c.satisfaction < 0.5);
+  if (unhappy.length) add('warning', `${unhappy.length} client(s) are unhappy with downtime and may cancel.`);
+  if ((state.clients || []).length && reg.loadShedding && state.grid.stage > 0 && !(state.energy.ups || []).length && !cap.inverterKw)
+    add('warning', 'Load-shedding will take your hosted clients offline. A UPS (or an inverter with batteries) keeps them running.');
+  const ups = state.energy.ups || [];
+  if (ups.length && room.serverWatts > ups.reduce((t, u) => t + byId[u.id].maxW, 0)) add('warning', `Your servers draw ${Math.round(room.serverWatts)} W, more than your UPS can deliver.`);
+  const readyServer = (state.servers || []).some((m, i) => room.servers[i].running);
+  if (readyServer && (state.offers || []).some((o) => state.servers.some((m) => !fitProblem(state, m, o.needs)))) add('info', 'Clients are looking for hosting your machines can handle. See Clients.');
   const idle = state.inventory.filter((x) => byId[x.id].kind === 'gpu' && !x.broken).length;
   if (idle) {
     const room = state.rigs.some((r) => r.gpus.length < byId[r.frameId].slots);
@@ -1343,11 +1807,21 @@ export function serialize(state) {
 export function deserialize(text) {
   const state = JSON.parse(text);
   if (state?.version === 2) migrateV2(state);
+  if (state?.version === 3) migrateV3(state);
   if (!state || state.version !== SAVE_VERSION) throw new Error('Incompatible save');
   return state;
 }
 
 /** v2 saves (before risers and boot drives): give existing rigs basic risers and a flash drive. */
+/** v3 saves (before servers and hosting). */
+function migrateV3(state) {
+  state.servers = state.servers || []; state.clients = state.clients || []; state.offers = state.offers || [];
+  state.reputation = state.reputation || 0;
+  state.energy.ups = state.energy.ups || [];
+  refreshOffers(state, true);
+  state.version = 4;
+}
+
 function migrateV2(state) {
   for (const rig of state.rigs) {
     rig.risers = rig.risers || Array.from({ length: byId[rig.frameId].slots }, () => makeOwned(state, 'riser009s', 'new', 1));
@@ -1363,8 +1837,9 @@ function migrateV2(state) {
 export function allOwned(state) {
   return [
     ...state.inventory, ...state.cooling,
-    ...state.energy.solar, ...state.energy.inverters, ...state.energy.batteries, ...state.energy.generators,
+    ...state.energy.solar, ...state.energy.inverters, ...state.energy.batteries, ...state.energy.generators, ...(state.energy.ups || []),
     ...state.racks, ...state.racks.flatMap((r) => r.asics),
+    ...(state.servers || []).flatMap((m) => [m, m.board, m.psu, ...m.cpus, ...m.ram, ...m.drives, ...(m.gpus || [])].filter(Boolean)),
     ...state.rigs.flatMap((r) => [...r.gpus, ...r.psus, ...(r.risers || []).filter((x) => !x.broken), ...(r.boot ? [r.boot] : []), { id: r.frameId, boughtDay: r.boughtDay }]),
   ];
 }

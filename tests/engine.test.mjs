@@ -528,3 +528,111 @@ test('offline catch-up is capped at a game week', () => {
   const r = E.catchUp(s, 48 * 3600 * 1000);
   assert.equal(r.hours, 7 * 24);
 });
+
+// ---------------------------------------------------------------- servers and hosting
+function miniServer(s) {
+  s.cash = 1e5;
+  const box = E.buy(s, 'nuc13pro');
+  E.buy(s, 'so4_16'); E.buy(s, 'so4_16'); E.buy(s, 'sn850x1'); E.buy(s, '990pro2');
+  E.autoFillServer(s, box.uid);
+  return s.servers.find((m) => m.uid === box.uid);
+}
+
+test('a mini PC builds from parts and checks compatibility', () => {
+  const s = E.newGame(21); s.cash = 1e5;
+  const box = E.buy(s, 'nuc13pro');
+  const m = s.servers[0];
+  assert.equal(E.serverStats(s, m).status, 'no-ram');
+  const d5 = E.buy(s, 'd5_32');
+  assert.ok(!E.installServerPart(s, box.uid, d5.uid).ok, 'desktop DDR5 does not fit a SO-DIMM board');
+  const hdd = E.buy(s, 'exos18');
+  assert.ok(!E.installServerPart(s, box.uid, hdd.uid).ok, 'no 3.5" bay in a NUC');
+  E.installServerPart(s, box.uid, E.buy(s, 'so4_16').uid);
+  assert.equal(E.serverStats(s, m).status, 'no-drive');
+  E.installServerPart(s, box.uid, E.buy(s, 'sn850x1').uid);
+  const st = E.serverStats(s, m);
+  assert.equal(st.status, 'running');
+  assert.equal(st.vcpu, 16); assert.equal(st.ramGB, 16);
+  assert.ok(st.wallPower > 5 && st.wallPower < 80);
+});
+
+test('a tower needs a matching board, CPU, RAM and PSU', () => {
+  const s = E.newGame(22); s.cash = 1e5;
+  const box = E.buy(s, 'north');
+  const intelCpu = E.buy(s, 'i5_12400');
+  const board = E.buy(s, 'b650ma');
+  assert.ok(E.installServerPart(s, box.uid, board.uid).ok);
+  assert.ok(!E.installServerPart(s, box.uid, intelCpu.uid).ok, 'LGA1700 CPU on an AM5 board');
+  assert.ok(E.installServerPart(s, box.uid, E.buy(s, 'r5_7600').uid).ok);
+  assert.ok(!E.installServerPart(s, box.uid, E.buy(s, 'd4_16').uid).ok, 'DDR4 on a DDR5 board');
+  E.installServerPart(s, box.uid, E.buy(s, 'd5_16').uid);
+  E.installServerPart(s, box.uid, E.buy(s, 'redplus4').uid);
+  assert.equal(E.serverStats(s, s.servers[0]).status, 'no-psu');
+  E.installServerPart(s, box.uid, E.buy(s, 'psu650b').uid);
+  assert.equal(E.serverStats(s, s.servers[0]).status, 'running');
+});
+
+test('clients sign on, pay daily and leave over downtime', () => {
+  const s = E.newGame(23);
+  const m = miniServer(s);
+  s.offers = [];
+  E.refreshOffers(s, true);
+  const offer = s.offers.find((o) => !E.fitProblem(s, m, o.needs));
+  assert.ok(offer, 'a fitting offer exists at reputation 0');
+  assert.ok(E.acceptOffer(s, offer.id).ok);
+  assert.equal(s.clients.length, 1);
+  const cash = s.cash; const before = s.stats.hostingUsd || 0;
+  E.advance(s, 24 * 10);
+  assert.ok(s.stats.hostingUsd > before, 'hosting earns');
+  assert.ok(Number.isFinite(s.cash) && s.cash !== cash);
+  // Switch the machine off: the client gets unhappy and eventually cancels.
+  m.on = false;
+  E.advance(s, 24 * 10);
+  assert.equal(s.clients.length, 0, 'client left after days of downtime');
+});
+
+test('a UPS keeps servers up through an outage', () => {
+  const s = E.newGame(24);
+  const m = miniServer(s);
+  E.buy(s, 'smt1500');
+  E.refreshOffers(s, true);
+  const offer = s.offers.find((o) => !E.fitProblem(s, m, o.needs));
+  E.acceptOffer(s, offer.id);
+  s.grid.outageHours = 3;
+  E.advance(s, 3);
+  assert.equal(s.clients[0].upToday, s.clients[0].hoursToday, 'no downtime with a charged UPS');
+});
+
+test('drive protection survives one dead drive; without it data is lost', () => {
+  const s = E.newGame(25); s.cash = 1e5;
+  const nas = E.buy(s, 'ds224');
+  E.installServerPart(s, nas.uid, E.buy(s, 'redplus4').uid);
+  E.installServerPart(s, nas.uid, E.buy(s, 'redplus4').uid);
+  const m = s.servers[0];
+  assert.equal(E.serverStats(s, m).usableTb, 8);
+  assert.ok(E.setRaid(s, nas.uid, true).ok);
+  assert.equal(E.serverStats(s, m).usableTb, 4);
+  m.drives[0].broken = true;
+  assert.equal(E.serverStats(s, m).status, 'degraded');
+  m.raid = false;
+  assert.equal(E.serverStats(s, m).status, 'data-loss');
+});
+
+test('servers count toward room power and net worth, and sell with their parts', () => {
+  const s = E.newGame(26);
+  const m = miniServer(s);
+  const room = E.roomStats(s);
+  assert.ok(room.serverWatts > 0 && room.demandWatts >= room.serverWatts);
+  const worth = E.netWorth(s);
+  const res = E.sell(s, m.uid);
+  assert.ok(res.ok && res.value > 0);
+  assert.ok(Math.abs(E.netWorth(s) - worth) < 1, 'selling converts parts to cash at their value');
+});
+
+test('v3 saves migrate to v4 with hosting fields', () => {
+  const s = E.newGame(27);
+  delete s.servers; delete s.clients; delete s.offers; delete s.reputation; delete s.energy.ups; s.version = 3;
+  const m = E.deserialize(JSON.stringify(s));
+  assert.equal(m.version, E.SAVE_VERSION);
+  assert.ok(Array.isArray(m.servers) && m.offers.length > 0);
+});
