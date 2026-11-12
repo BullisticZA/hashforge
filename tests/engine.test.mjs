@@ -270,7 +270,7 @@ test('bills arrive every 30 days and match grid energy', () => {
 test('the market moves, difficulty rises and halvings happen', () => {
   const s = fresh();
   E.advance(s, 24 * 700);
-  for (const a of Object.keys(ALGOS)) assert.ok(s.market.difficulty[a] > 1.1, `${a} difficulty rises`);
+  for (const a of Object.keys(ALGOS)) assert.ok(s.market.trend[a] > E.newGame(42).market.trend[a] * 1.05, `${a} long-term difficulty rises`);
   assert.equal(s.market.halvings, 1);
 });
 
@@ -635,4 +635,37 @@ test('v3 saves migrate to v4 with hosting fields', () => {
   const m = E.deserialize(JSON.stringify(s));
   assert.equal(m.version, E.SAVE_VERSION);
   assert.ok(Array.isArray(m.servers) && m.offers.length > 0);
+});
+
+test('difficulty follows price both ways, so earnings recover after a slump', () => {
+  const s = E.newGame(31);
+  const r0 = E.revenuePerUnit(s, 'etchash');
+  let min = Infinity; let recovered = false;
+  for (let d = 0; d < 1460; d++) {
+    E.advance(s, 24);
+    const f = E.revenuePerUnit(s, 'etchash') / r0;
+    min = Math.min(min, f);
+    if (min < 0.8 && f > min * 1.5) recovered = true;
+  }
+  assert.ok(min > 0.15, `earnings never collapse (min ${min.toFixed(2)})`);
+  assert.ok(recovered, 'earnings climb back after a dip');
+});
+
+test('old saves with runaway difficulty are re-based', () => {
+  const s = E.newGame(32);
+  s.version = 4; delete s.market.trend;
+  for (const a of Object.keys(s.market.difficulty)) s.market.difficulty[a] = 9;
+  const m = E.deserialize(JSON.stringify(s));
+  assert.ok(m.market.difficulty.etchash < 2);
+});
+
+test('a UPS carries mining rigs for part of an outage', () => {
+  const s = E.newGame(33); s.cash = 1e5;
+  const r = E.buy(s, 'frame4'); E.buy(s, 'psu1000g'); E.buy(s, 'rtx3060ti'); E.buy(s, 'usb16'); E.autoFill(s, r.uid);
+  E.buy(s, 'smt1500');
+  s.grid.outageHours = 1;
+  const mined = s.stats.minedUsd;
+  E.advance(s, 1);
+  assert.ok(s.stats.minedUsd > mined, 'mining continued on UPS power');
+  assert.ok(s.energy.ups[0].charge < 400, 'UPS drained');
 });

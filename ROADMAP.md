@@ -50,6 +50,8 @@ a sensible start should *usually* make money in the first game-year, but never g
 - Servers on the 2D floor (IT corner) and in the 3D tour, 3D models for every case, board, CPU, memory module, drive and UPS
 - **Save slots**, save-file download and upload, and in-game confirm buttons instead of browser pop-ups
 - Grouped menu: Run, Buy, Build, Grow
+- **Difficulty follows price** with a lag instead of only climbing: earnings swing up and down and recover after slumps, with a slow ~4.5%/year squeeze. Old saves are re-based
+- **UPS units also carry mining rigs** for part of an outage, after servers
 
 ## 🔜 v0.3: Builders & Workshop
 - **Thermal work:** repaste, new thermal pads, copper shims and plates: lower temps, less wear, more hashrate

@@ -12,7 +12,7 @@ import {
 
 export const DAY_HOURS = 24;
 export const BILL_PERIOD_DAYS = 30;
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 const DEVICE_TEMP_OFFSET = 35;  // chips run this much hotter than the room
 const THROTTLE_AT = 75;
 const SHUTDOWN_AT = 95;
@@ -52,10 +52,11 @@ export function newPrestige() {
 export function newGame(seed = Date.now() % 2147483647, options = {}) {
   const prestige = options.prestige || newPrestige();
   const region = REGIONS.find((r) => r.id === (options.region || 'za')) || REGIONS[0];
-  const index = {}; const difficulty = {}; const history = {};
+  const index = {}; const difficulty = {}; const history = {}; const trend = {};
   for (const a of Object.keys(ALGOS)) {
     index[a] = 1.6;
-    difficulty[a] = eraDifficulty(prestige.forks);
+    trend[a] = DIFF_BASE * eraDifficulty(prestige.forks);
+    difficulty[a] = difficultyTarget(trend[a], 1.6);
     history[a] = [1.6];
   }
   const state = {
@@ -71,7 +72,7 @@ export function newGame(seed = Date.now() % 2147483647, options = {}) {
     energy: { solar: [], inverters: [], batteries: [], generators: [], ups: [], gridCharge: true },
     servers: [], clients: [], offers: [], reputation: 0,
     grid: { stage: 0, stageDaysLeft: 3, outageHours: 0, breakerTripped: false, offline: false, offlineReason: '' },
-    market: { index, difficulty, history, regime: 'bull', regimeDaysLeft: 45, halvings: 0 },
+    market: { index, difficulty, trend, history, regime: 'bull', regimeDaysLeft: 45, halvings: 0 },
     listings: [],
     weather: 1,
     dust: 0,
@@ -142,6 +143,15 @@ export function setTariffPlan(state, plan) {
   state.tariffPlan = plan;
   addLog(state, 'info', plan === 'daytime' ? 'Switched to the daytime surplus tariff: cheap by day, pricier at night.' : 'Switched to the standard tariff.');
   return { ok: true };
+}
+// Difficulty follows the coin price: when prices rise, more miners switch on and difficulty climbs
+// after them; when prices fall, miners unplug and difficulty drops. So earnings swing both ways
+// (a bull run pays well until difficulty catches up), with only a slow long-term squeeze (`trend`).
+const DIFF_BASE = 1.6 ** 0.15 / 1.6;          // starting earnings match the opening bull market
+const DIFF_TREND_PER_DAY = 0.00012;           // ~4.5% a year of new, more efficient hardware joining
+const DIFF_FOLLOW = 0.035;                    // difficulty closes 3.5% of the gap to its target each day
+export function difficultyTarget(trend, index) {
+  return trend * index ** 0.85;
 }
 export function halvingFactor(state, algo) {
   return algo === 'sha256' ? 0.5 ** state.market.halvings : 1;
@@ -1011,8 +1021,9 @@ function stepMarket(state) {
     const own = gaussian(state) * 0.025;
     const reversion = -0.002 * Math.log(m.index[a]);
     m.index[a] = Math.min(8, Math.max(0.15, m.index[a] * Math.exp(drift + reversion + shared + own)));
-    // Difficulty climbs slowly, faster when prices are high (more miners join), and eases when miners unplug in a slump.
-    m.difficulty[a] *= m.index[a] < 0.7 ? 1 - 0.0001 : 1 + 0.0005 + Math.min(0.001, 0.0003 * Math.max(0, m.index[a] - 1));
+    m.trend[a] *= 1 + DIFF_TREND_PER_DAY;
+    const target = difficultyTarget(m.trend[a], m.index[a]);
+    m.difficulty[a] += (target - m.difficulty[a]) * DIFF_FOLLOW * (1 + 0.5 * gaussian(state) ** 2);
     m.history[a].push(+m.index[a].toFixed(4));
     if (m.history[a].length > 120) m.history[a].shift();
   }
@@ -1175,8 +1186,8 @@ export function advance(state, hours) {
     }
 
     const online = !state.grid.offline;
-    hostingHour(state, !online);
-    const gross = online ? room.grossPerDay / DAY_HOURS : 0;
+    const upsShare = upsHour(state, !online, room.minerWatts);
+    const gross = online ? room.grossPerDay / DAY_HOURS : (room.grossPerDay / DAY_HOURS) * upsShare;
     const t = tariffUsd(state) * tariffHourMult(state);
     const gridKwh = online ? flow.gridKwh : (flow.gridUp ? flow.gridKwh - demandKw : 0);
     const gridCost = Math.max(0, gridKwh) * t;
@@ -1542,30 +1553,36 @@ function lostData(state, m) {
   addLog(state, 'warning', `💥 Data lost on ${m.name}: ${gone.map((c) => c.client).join(', ')} left. Reputation -${10 * gone.length}. Turn on drive protection and use NAS or enterprise drives.`);
 }
 
-/** One hour of hosting: which machines stay up (UPS can carry them through an outage). */
-function hostingHour(state, gridDown) {
-  if (!state.servers?.length) return;
-  const stats = state.servers.map((m) => ({ m, st: serverStats(state, m) }));
+/**
+ * One hour on UPS power. Servers come first (clients pay for uptime); whatever charge and output
+ * is left keeps mining rigs and ASICs going for part of the hour. Returns the share of the
+ * mining load the UPS units carried (0..1).
+ */
+function upsHour(state, gridDown, minerWatts) {
+  const stats = (state.servers || []).map((m) => ({ m, st: serverStats(state, m) }));
   const load = stats.filter((x) => x.st.running).reduce((s, x) => s + x.st.wallPower, 0);
-  let up = !gridDown;
   const upses = state.energy.ups || [];
-  if (gridDown && load > 0) {
-    const stored = upses.reduce((s, u) => s + u.charge, 0);
-    const maxW = upses.reduce((s, u) => s + byId[u.id].maxW, 0);
-    if (stored >= load && maxW >= load) {
-      up = true;
-      let need = load;
-      for (const u of upses) { const take = Math.min(u.charge, need); u.charge -= take; need -= take; }
+  const draw = (wh) => { let need = wh; for (const u of upses) { const take = Math.min(u.charge, need); u.charge -= take; need -= take; } };
+  let up = !gridDown; let minerShare = 0;
+  if (gridDown && upses.length) {
+    let stored = upses.reduce((s, u) => s + u.charge, 0);
+    let maxW = upses.reduce((s, u) => s + byId[u.id].maxW, 0);
+    if (load > 0 && stored >= load && maxW >= load) { up = true; draw(load); stored -= load; maxW -= load; }
+    if (minerWatts > 0 && stored > 1 && maxW > 0) {
+      // A UPS can't push more than its rated output; over that it simply trips, so only part of the hour runs.
+      minerShare = maxW >= minerWatts ? Math.min(1, stored / minerWatts) : 0;
+      if (minerShare > 0) draw(minerWatts * minerShare);
     }
   } else if (!gridDown) {
     for (const u of upses) u.charge = Math.min(byId[u.id].wh, u.charge + byId[u.id].wh * 0.25);
   }
   state.hostingUp = up;
-  for (const c of state.clients) {
+  for (const c of state.clients || []) {
     const x = stats.find((s) => s.m.uid === c.serverUid);
     c.hoursToday += 1;
     if (up && x?.st.running) c.upToday += 1;
   }
+  return minerShare;
 }
 
 /** End of a day: pay clients by uptime, update satisfaction and reputation, wear drives, renewals. */
@@ -1808,11 +1825,24 @@ export function deserialize(text) {
   const state = JSON.parse(text);
   if (state?.version === 2) migrateV2(state);
   if (state?.version === 3) migrateV3(state);
+  if (state?.version === 4) migrateV4(state);
   if (!state || state.version !== SAVE_VERSION) throw new Error('Incompatible save');
   return state;
 }
 
 /** v2 saves (before risers and boot drives): give existing rigs basic risers and a flash drive. */
+/** v4 saves used a difficulty that only ever climbed. Re-base it on the price-following model. */
+function migrateV4(state) {
+  const m = state.market;
+  m.trend = {};
+  for (const a of Object.keys(ALGOS)) {
+    m.trend[a] = DIFF_BASE * eraDifficulty(state.prestige.forks) * (1 + DIFF_TREND_PER_DAY) ** state.day;
+    m.difficulty[a] = difficultyTarget(m.trend[a], m.index[a]);
+  }
+  addLog(state, 'market', 'Network difficulty now follows coin prices: it drops when miners unplug in a slump.');
+  state.version = 5;
+}
+
 /** v3 saves (before servers and hosting). */
 function migrateV3(state) {
   state.servers = state.servers || []; state.clients = state.clients || []; state.offers = state.offers || [];
@@ -1821,6 +1851,7 @@ function migrateV3(state) {
   refreshOffers(state, true);
   state.version = 4;
 }
+
 
 function migrateV2(state) {
   for (const rig of state.rigs) {

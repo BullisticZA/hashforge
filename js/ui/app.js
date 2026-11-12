@@ -609,7 +609,7 @@ export class App {
       cpu: () => [['Socket', item.socket], ['Cores / threads', `${item.cores} / ${item.threads}`], ['Power', `${item.watts} W TDP`]],
       ram: () => [['Type', item.type.replace('-SO', ' SO-DIMM').replace('-ECC', ' ECC')], ['Size', `${item.gb} GB`]],
       drive: () => [['Capacity', E.fmtTb(item.tb)], ['Interface', `${item.iface.toUpperCase()}${item.size === 'm2' ? ' (M.2)' : ` · ${item.size}"`}`], ['Class', `${DRIVE_CLASS[item.cls].name}: ${DRIVE_CLASS[item.cls].note}`], ['Power', `${item.watts} W`]],
-      ups: () => [['Battery', `${item.wh} Wh`], ['Max load', `${item.maxW} W`], ['Runtime', `~${Math.round(item.wh / 150 * 60)} min at 150 W`]],
+      ups: () => [['Battery', `${item.wh} Wh`], ['Max load', `${item.maxW} W`], ['Runtime', `~${Math.round(item.wh / 150 * 60)} min at 150 W · ~${Math.round(item.wh / 600 * 60)} min for a 600 W rig`], ['Covers', 'Servers first, then mining rigs and ASICs with what is left']],
     }[item.kind];
     return lines ? `<div class="kv">${lines().map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('')}</div>` : '';
   }
@@ -744,7 +744,8 @@ export class App {
           <span>Batteries</span><span>${cap.batteryKwh ? `${cap.batteryStored.toFixed(1)} / ${cap.batteryKwh.toFixed(1)} kWh` : 'None'}</span>
           <span>Solar</span><span>${cap.solarKwp ? `${cap.solarKwp} kWp · ${(cap.solarKwp * E.sunFactor(s)).toFixed(1)} kW now` : 'None'}</span>
           <span>Weather</span><span>${s.weather >= 1 ? '☀️ Sunny' : s.weather > 0.5 ? '⛅ Partly cloudy' : '☁️ Overcast'}</span>
-          <span>Generator</span><span>${cap.generatorKw ? `${cap.generatorKw} kW` : 'None'}</span></div>
+          <span>Generator</span><span>${cap.generatorKw ? `${cap.generatorKw} kW` : 'None'}</span>
+          <span>UPS</span><span>${(s.energy.ups || []).length ? `${Math.round(s.energy.ups.reduce((t, u) => t + u.charge, 0))} Wh ready` : 'None'}</span></div>
           ${cap.batteries.length ? `<label class="row small" style="margin-top:8px"><input type="checkbox" data-action="grid-charge" ${s.energy.gridCharge ? 'checked' : ''}> Charge batteries from the grid</label>` : ''}
           <button class="btn" style="margin-top:8px" data-action="nav" data-id="shop" onclick="window.hf.shopTab='energy'">Buy solar & backup</button></div>
         <div class="card"><h3>This month</h3><div class="kv">
@@ -759,12 +760,13 @@ export class App {
   /** Every inverter, battery, solar array and generator, with 3D and Sell buttons. */
   energyGearHtml() {
     const s = this.state; const m = this.money;
-    const groups = [['Inverters', s.energy.inverters], ['Batteries', s.energy.batteries], ['Solar', s.energy.solar], ['Generators', s.energy.generators]];
+    const groups = [['Inverters', s.energy.inverters], ['Batteries', s.energy.batteries], ['Solar', s.energy.solar], ['Generators', s.energy.generators], ['UPS units', s.energy.ups || []]];
     const detail = (o) => {
       const spec = byId[o.id];
       if (spec.kind === 'battery') return `${spec.kwh} kWh · ${Math.round((1 - (o.wear || 0)) * 100)}% capacity left · ${((o.soc || 0)).toFixed(1)} kWh stored`;
       if (spec.kind === 'inverter') return `${spec.kw} kW · ${Math.round(spec.efficiency * 100)}% efficient${o.broken ? ' · <span class="bad">failed</span>' : ''}`;
       if (spec.kind === 'solar') return `${spec.kwp} kWp`;
+      if (spec.kind === 'ups') return `${spec.maxW} W max · ${Math.round(o.charge || 0)} / ${spec.wh} Wh charged`;
       return `${spec.kw} kW`;
     };
     const rows = groups.filter(([, list]) => list.length).map(([title, list]) => `<div class="part-head">${title}</div>${list.map((o) => `<div class="part-row gear">
@@ -776,7 +778,7 @@ export class App {
 
   viewMarket() {
     const s = this.state; const m = this.money;
-    return `<div class="page-head"><div><h1>Market</h1><div class="muted">Simulated prices: ${s.market.regime} market. Difficulty keeps rising; halvings cut SHA-256 rewards.</div></div></div>
+    return `<div class="page-head"><div><h1>Market</h1><div class="muted">Simulated prices: ${s.market.regime} market. Difficulty follows price with a lag: bull runs pay well until miners pile in, slumps hurt until they unplug. Halvings cut SHA-256 rewards.</div></div></div>
       <div class="grid">${Object.entries(ALGOS).map(([a, al]) => {
         const h = s.market.history[a];
         const change = h.length > 7 ? (h[h.length - 1] / h[h.length - 8] - 1) * 100 : 0;
